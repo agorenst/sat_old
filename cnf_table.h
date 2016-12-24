@@ -60,7 +60,6 @@ public:
         }
     }
 
-
     bool check_invariants();
 };
 

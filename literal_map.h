@@ -26,7 +26,7 @@ public:
         TRACE("literal_map:operator[](%d), accessing elt: %d\n", i, index);
         return m[index];
     }
-
+    
     struct key_iterator {
         literal current_value;
         key_iterator& operator++() {
