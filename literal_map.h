@@ -1,3 +1,6 @@
+#ifndef LITERAL_MAP_H
+#define LITERAL_MAP_H
+
 #include <memory>
 
 typedef int literal;
@@ -52,3 +55,4 @@ public:
     }
 };
 
+#endif

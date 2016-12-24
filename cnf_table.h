@@ -1,3 +1,6 @@
+#ifndef CNF_TABLE_H
+#define CNF_TABLE_H
+
 #include "literal_map.h"
 #include "simple_parser.h"
 
@@ -111,3 +114,5 @@ bool cnf_table::check_invariants() {
     }
     return true;
 };
+
+#endif
