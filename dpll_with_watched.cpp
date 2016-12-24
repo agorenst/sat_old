@@ -80,23 +80,21 @@ std::ostream& operator<<(std::ostream& o, const assignment_t& a) {
     return o;
 }
 
-bool basic_dpll(watched_literals wl, assignment_t a) {
+bool basic_dpll(watched_literals& wl, assignment_t a) {
     if (is_sat(wl, a)) {
         //cout << "dpll with " << a << endl;
         return true;
     }
     int next_var = find_next_var(wl.cnf, a);
-    auto true_wl = wl;
     auto true_a = a;
-    if (bcp(true_wl, true_a, next_var)) {
-        if (basic_dpll(true_wl, true_a)) {
+    if (bcp(wl, true_a, next_var)) {
+        if (basic_dpll(wl, true_a)) {
             return true;
         }
     }
-    auto false_wl = wl;
     auto false_a = a;
-    if (bcp(false_wl, false_a, -next_var)) {
-        if (basic_dpll(false_wl, false_a)) {
+    if (bcp(wl, false_a, -next_var)) {
+        if (basic_dpll(wl, false_a)) {
             return true;
         }
     }
