@@ -1,3 +1,5 @@
+dpll_with_watched: watched_literals.h dpll_with_watched.cpp simple_parser cnf_table.h
+	clang++ -DUSE_ASSERT -Wall -O2 -std=c++14 dpll_with_watched.cpp simple_parser.o -o dpll_with_watched
 watched_literals_test: watched_literals.h watched_literals_test.cpp simple_parser cnf_table.h
 	clang++ -Wall -O2 -std=c++14 watched_literals_test.cpp simple_parser.o -o watched_literals_test
 basic_dpll: cnf_table.h simple_parser
@@ -11,4 +13,4 @@ simple_parser: simple_parser.cpp simple_parser.h
 	clang++ -Wall -O2 -std=c++14 simple_parser.cpp -c -o simple_parser.o
 
 clean:
-	rm -f *~ *.o literal_map_test cnf_table_test basic_dpll watched_literals_test
+	rm -f *~ *.o literal_map_test cnf_table_test basic_dpll watched_literals_test dpll_with_watched

@@ -9,7 +9,7 @@
 #include <iostream>
 #include <algorithm>
 
-#ifdef CNF_TABLE_DBG
+#ifdef USE_ASSERT
 #include <cassert>
 #define ASSERT(x) assert(x)
 #else
@@ -55,7 +55,7 @@ public:
         }
         raw_iterator clause_end = core_map.get() + size;
 
-        ASSERT(clause_end <= end(core_map));
+        ASSERT(clause_end <= core_map.get()+max_size);
 
         clauses[clause_count++] = {clause_start, clause_end};
         for (auto x : c) {
