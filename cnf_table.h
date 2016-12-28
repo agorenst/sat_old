@@ -71,6 +71,21 @@ cnf_table::raw_iterator end(const cnf_table::clause& c) { return c.finish; }
 cnf_table::raw_iterator begin(const cnf_table::clause_iterator& c) { return c->start; }
 cnf_table::raw_iterator end(const cnf_table::clause_iterator& c) { return c->finish; }
 
+class clause_iteration {
+    const cnf_table& c;
+    public:
+    clause_iteration(const cnf_table& c): c(c) {}
+    typedef cnf_table::clause_iterator iterator;
+
+    iterator begin() { return c.clauses.get(); }
+    iterator end() { return c.clauses.get() + c.clause_count; }
+};
+
+
+clause_iteration iterate_clauses(const cnf_table& c) {
+    return clause_iteration(c);
+}
+
 std::ostream& operator<<(std::ostream& o, const cnf_table::clause& c) {
     std::for_each(begin(c), end(c), [&](literal l) {
         o << l << " ";
@@ -104,7 +119,7 @@ bool cnf_table::check_invariants() {
     }
     // For every literal, every clause that literal thinks it's in
     // actually contains that literal.
-    for (literal l : literals_to_clauses) {
+    for (literal l : key_iter(literals_to_clauses)) {
         for (clause_iterator cit : literals_to_clauses[l]) {
             auto find_result = std::find(begin(cit), end(cit), l);
             if (find_result == end(cit)) {

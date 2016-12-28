@@ -1,6 +1,7 @@
 #include "cnf_table.h"
 #include "simple_parser.h"
 #include "watched_literals.h"
+#include "small_set.h"
 
 #include <iostream>
 
@@ -32,7 +33,7 @@ cnf_table load_cnf_table() {
 }
 
 struct assignment_t {
-    std::set<literal> data;
+    small_set<literal> data;
     void insert(literal l) {
         data.insert(l);
     }
@@ -40,10 +41,10 @@ struct assignment_t {
         data.insert(l);
     }
     bool is_true(literal l) const {
-        return data.find(l) != data.end();
+        return data.contains(l);
     }
     bool is_false(literal l) const {
-        return data.find(-l) != data.end();
+        return data.contains(-l);
     }
     bool is_unassigned(literal l) const {
         return !is_true(l) && !is_false(l);
@@ -51,7 +52,7 @@ struct assignment_t {
 };
 
 // We will use the watched_literals data structure to expedite this:
-bool is_sat(const watched_literals& wl, const assignment_t& a) {
+bool is_sat(watched_literals& wl, const assignment_t& a) {
     return wl.is_sat(a);
 }
 

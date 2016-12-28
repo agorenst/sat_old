@@ -3,12 +3,13 @@
 
 #include "cnf_table.h"
 #include "literal_map.h"
+#include "clause_map.h"
+#include "small_set.h"
+#include "collection_partition.h"
 
 #include <iostream>
 
-#include <map>
 #include <queue>
-#include <set>
 
 #ifdef WATCHED_VERBOSE
 #include <cstdio>
@@ -25,26 +26,24 @@ class watched_literals {
         literal watch2 = 0;
     };
 
-    typedef std::map<literal, std::set<cnf_table::clause_iterator>> lits_to_clauses_t;
-    typedef std::map<cnf_table::clause_iterator, watch_pair> clauses_to_lits_t;
+    // TODO: fix, these are *awful* names.
+    typedef literal_map<small_set<cnf_table::clause_iterator>> lits_to_clauses_t;
     lits_to_clauses_t clauses_watched_by;
+    typedef clause_map<watch_pair> clauses_to_lits_t;
     clauses_to_lits_t literals_watching;
 
     watched_literals(const cnf_table& rt):
-        cnf(rt)
+        cnf(rt),
+        clauses_watched_by(rt.max_literal_count*2),
+        literals_watching(cnf.clause_count, cnf.clauses.get())
     {}
 
     void initialize() {
 
-        // Wipe out any old data
-        clauses_watched_by.clear();
-        literals_watching.clear();
-
         // Initialize the watching pairs...
-        for (cnf_table::clause_iterator it = cnf.clauses.get();
-             it != cnf.clauses.get() + cnf.clause_count;
+        for (cnf_table::clause_iterator it = iterate_clauses(cnf).begin();
+             it != iterate_clauses(cnf).end();
              ++it) {
-            // need to have at least 2 literals to watch...
             ASSERT(end(it)-begin(it) >= 2);
 
             literal first = *begin(it);
@@ -99,6 +98,7 @@ class watched_literals {
         // each watch literal better be distinct from its partner.
         for (auto&& clause_watchers : literals_watching) {
             auto wp = clause_watchers.second;
+            ASSERT(wp.watch1 != wp.watch2);
             if (wp.watch1 == wp.watch2) {
                 return false;
             }
@@ -107,30 +107,34 @@ class watched_literals {
 
         // These next two for loops make sure all our
         // data structures are consistent with each other.
-        for (auto&& lit_clauses : clauses_watched_by) {
-            auto l = lit_clauses.first;
-            auto clause_set = lit_clauses.second;
-
-            // The clause better understand it's being
-            // watched by both of these literals.
-            for (auto c : clause_set) {
+        for (auto&& l : key_iter(clauses_watched_by)) {
+            //auto l = lit_clauses.first;
+            bool has_error = false;
+            for_each(begin(clauses_watched_by[l]),
+                     end(clauses_watched_by[l]),
+                     [&](cnf_table::clause_iterator c) {
+                // The clause better understand it's being
+                // watched by both of these literals.
                 auto wp = literals_watching[c];
+                ASSERT(wp.watch1 == l || wp.watch2 == l);
                 if (wp.watch1 != l && wp.watch2 != l) {
-                    return false;
+                    has_error = true;
                 }
-            }
+            });
+            ASSERT(!has_error);
+            if (has_error) { return false; }
         }
         for (auto&& clauses_watchers : literals_watching) {
             auto cit = clauses_watchers.first;
             auto wp = clauses_watchers.second;
 
             // The watchers better know they're watching this clause
-            if (clauses_watched_by[wp.watch1].find(cit) ==
-                clauses_watched_by[wp.watch1].end()) {
+            ASSERT(clauses_watched_by[wp.watch1].contains(cit));
+            if (!clauses_watched_by[wp.watch1].contains(cit)) {
                 return false;
             }
-            if (clauses_watched_by[wp.watch2].find(cit) ==
-                clauses_watched_by[wp.watch2].end()) {
+            ASSERT(clauses_watched_by[wp.watch2].contains(cit));
+            if (!clauses_watched_by[wp.watch2].contains(cit)) {
                 return false;
             }
         }
@@ -147,6 +151,7 @@ class watched_literals {
                 if (std::any_of(begin(cit), end(cit), [&](literal l) {
                     return !a.is_false(l);
                 })) {
+                    ASSERT(false);
                     return false;
                 }
             }
@@ -168,9 +173,9 @@ class watched_literals {
             literal l = worklist.front(); worklist.pop();
             //std::cout << "Setting true: " << -l << std::endl;
             a.set_true(-l);
-            auto clauses_to_update = clauses_watched_by[l];
 
-            for (cnf_table::clause_iterator c : clauses_to_update) {
+            auto clauses_to_iter = clauses_watched_by[l];
+            for (auto c : clauses_to_iter) {
                 //std::cout << "Considering watched clause: " << c << std::endl;
 
                 // Simple case: if the clause is already satisfied,
@@ -215,11 +220,15 @@ class watched_literals {
                 // Continuation case: we update negated.
                 else {
                     //std::cout << "Continuation case, updating watch information" << std::endl;
-                    ASSERT(clauses_watched_by[negated].find(c) != clauses_watched_by[negated].end());
-                    ASSERT(clauses_watched_by[new_literal].find(c) == clauses_watched_by[new_literal].end());
+                    ASSERT(clauses_watched_by[negated].contains(c));
+                    ASSERT(!clauses_watched_by[new_literal].contains(c));
 
-                    clauses_watched_by[negated].erase(c);
-                    clauses_watched_by[new_literal].insert(c);
+                    // This doesn't allocate or free any memory.
+                    swap_elt(clauses_watched_by[negated],
+                             clauses_watched_by[new_literal],
+                             c);
+                    //clauses_watched_by[negated].erase(c);
+                    //clauses_watched_by[new_literal].insert(c);
                     // update the pair.
                     negated = new_literal;
                 }
@@ -233,7 +242,7 @@ class watched_literals {
 };
 
 std::ostream& operator<<(std::ostream& o, const watched_literals::lits_to_clauses_t& w) {
-    for (const auto& lit_clause_pair : w) {
+    for (const auto& lit_clause_pair : pair_iter(w)) {
         o << lit_clause_pair.first << " watching: ";
         std::for_each(begin(lit_clause_pair.second), end(lit_clause_pair.second), [&](cnf_table::clause_iterator it) {
             o << "(" << it << ") ";
