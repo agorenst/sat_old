@@ -77,7 +77,6 @@ class watched_literals {
             if (x == negated) { continue; }
             if (x == other) { continue; }
             if (a.is_true(x)) {
-                //std::cout << "Returning " << x << " as a set-true literal" << std::endl;
                 return x;
             }
         }
@@ -85,7 +84,6 @@ class watched_literals {
             if (x == negated) { continue; }
             if (x == other) { continue; }
             if (!a.is_false(x)) {
-                //std::cout << "Returning " << x << " as an unset literal" << std::endl;
                 return x;
             }
         }
@@ -162,33 +160,30 @@ class watched_literals {
     // The main work-loop: we've just added set_true to a, and now
     // we want to make sure all the induced unit clauses are properly
     // propogated.
-    template <typename AssignmentClass>
-    bool apply_literal(AssignmentClass& a, literal set_true) {
+    template <typename AssignmentClass, typename Recorder>
+    literal apply_literal(AssignmentClass& a, literal set_true, Recorder r) {
         ASSERT(check_invariants(a));
         literal L = -set_true;
+
+        // TODO: better data structure should be here...
         std::queue<literal> worklist;
         worklist.push(L);
         while(worklist.size() > 0) {
             // l is a literal that's been induced false...
             literal l = worklist.front(); worklist.pop();
-            //std::cout << "Setting true: " << -l << std::endl;
             a.set_true(-l);
 
-            auto clauses_to_iter = clauses_watched_by[l];
+            small_set<cnf_table::clause_iterator> clauses_to_iter = clauses_watched_by[l];
             for (auto c : clauses_to_iter) {
-                //std::cout << "Considering watched clause: " << c << std::endl;
-
                 // Simple case: if the clause is already satisfied,
                 // we can safely let it's other watcher (us) be "false"
                 // without updating anything else.
+
                 watch_pair& watchers = literals_watching[c];
-                //std::cout << "Watch pair: { " << watchers.watch1 << ", " << watchers.watch2 << " }" << std::endl;
                 if (a.is_true(watchers.watch1)) {
-                    //std::cout << "Simple case, satisfied by: " << watchers.watch1 << std::endl;
                     continue;
                 }
                 if (a.is_true(watchers.watch2)) {
-                    //std::cout << "Simple case, satisfied by: " << watchers.watch2 << std::endl;
                     std::swap(watchers.watch1, watchers.watch2);
                     continue;
                 }
@@ -197,9 +192,9 @@ class watched_literals {
                 // invariants. If our other watcher was already set
                 // to false, then we have a conflict.
                 if (a.is_false(watchers.watch1) && a.is_false(watchers.watch2)) {
-                    //std::cout << "We assume this clause is false because both watchers are false" << std::endl;
                     ASSERT(check_invariants(a));
-                    return false;
+                    // return the litetral that caused the conflict
+                    return l; 
                 }
 
                 // For convenience, parse out the watcher pair into the watcher
@@ -213,31 +208,28 @@ class watched_literals {
 
                 // Unit case: we MUST assign "other" to be true.
                 if (new_literal == 0) {
-                    //std::cout << "Did not find a new literal, entering unit case for setting: " << other << " true." << std::endl;
+                    // record the implied variable, and the clause implying it.
+                    *r = {other, c};
+
                     worklist.push(-other);
                 }
 
                 // Continuation case: we update negated.
                 else {
-                    //std::cout << "Continuation case, updating watch information" << std::endl;
                     ASSERT(clauses_watched_by[negated].contains(c));
                     ASSERT(!clauses_watched_by[new_literal].contains(c));
 
-                    // This doesn't allocate or free any memory.
                     swap_elt(clauses_watched_by[negated],
                              clauses_watched_by[new_literal],
                              c);
-                    //clauses_watched_by[negated].erase(c);
-                    //clauses_watched_by[new_literal].insert(c);
                     // update the pair.
                     negated = new_literal;
                 }
             }
         }
         // we got through all unit prop without any conflict. Hooray.
-        //std::cout << "Prop completed without conflict, returning true" << std::endl;
         ASSERT(check_invariants(a));
-        return true;
+        return 0;
     }
 };
 

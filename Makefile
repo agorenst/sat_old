@@ -1,3 +1,5 @@
+clause_learning: clause_learning.cpp assignment.h simple_parser
+	clang++ -Wall -O2 -g -std=c++14 clause_learning.cpp simple_parser.o -o clause_learning
 #collection_partition_test: collection_partition.h collection_partition_test.cpp
 #	clang++ -Wall -O2 -g -std=c++14 collection_partition_test.cpp -o collection_partition_test
 dpll_with_watched: watched_literals.h dpll_with_watched.cpp simple_parser cnf_table.h
