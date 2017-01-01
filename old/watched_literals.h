@@ -11,6 +11,9 @@
 
 #include <queue>
 
+
+#include <cassert>
+
 #ifdef WATCHED_VERBOSE
 #include <cstdio>
 #define TRACE(...) printf(__VA_ARGS__)
@@ -20,7 +23,7 @@
 
 class watched_literals {
     public:
-    const cnf_table& cnf;
+    cnf_table& cnf;
     struct watch_pair {
         literal watch1 = 0;
         literal watch2 = 0;
@@ -32,38 +35,81 @@ class watched_literals {
     typedef clause_map<watch_pair> clauses_to_lits_t;
     clauses_to_lits_t literals_watching;
 
-    watched_literals(const cnf_table& rt):
+    watched_literals(cnf_table& rt):
         cnf(rt),
         clauses_watched_by(rt.max_literal_count*2),
-        literals_watching(cnf.clause_count, cnf.clauses.get())
+        literals_watching(cnf.max_clause_count, cnf.clauses.get())
     {}
 
-    void initialize() {
+    void watch_new_clause(cnf_table::clause_iterator it) {
+        ASSERT(end(it)-begin(it) >= 2);
+        literal first = *begin(it);
+        literal second = *std::next(begin(it));
 
+        // Initialize the "bidirectional map"
+        literals_watching[it] = {first, second};
+        clauses_watched_by[first].insert(it);
+        clauses_watched_by[second].insert(it);
+    }
+
+    template <typename Assignment>
+    void watch_new_clause(cnf_table::clause_iterator it, const Assignment& a) {
+        ASSERT(end(it)-begin(it) >= 2);
+        literal first = *begin(it);
+        literal second = *std::next(begin(it));
+
+        // Initialize the "bidirectional map"
+        literals_watching[it] = {first, second};
+        clauses_watched_by[first].insert(it);
+        clauses_watched_by[second].insert(it);
+
+        literal real_first = find_new_literal(it, a, first, second);
+        if (real_first) {
+            clauses_watched_by[real_first].insert(it);
+            clauses_watched_by[first].erase(it);
+        }
+        else {
+            real_first = first;
+        }
+
+        literal real_second = find_new_literal(it, a, real_first, second);
+        if (real_second) {
+            clauses_watched_by[real_second].insert(it);
+            clauses_watched_by[second].erase(it);
+        }
+        else {
+            real_second = second;
+        }
+
+        literals_watching[it] = {real_first, real_second};
+
+        //assert(!a.is_false(real_first) && !a.is_false(real_second));
+    }
+
+    void initialize() {
         // Initialize the watching pairs...
         for (cnf_table::clause_iterator it = iterate_clauses(cnf).begin();
              it != iterate_clauses(cnf).end();
              ++it) {
-            ASSERT(end(it)-begin(it) >= 2);
-
-            literal first = *begin(it);
-            literal second = *std::next(begin(it));
-
-            // Initialize the "bidirectional map"
-            literals_watching[it] = {first, second};
-            clauses_watched_by[first].insert(it);
-            clauses_watched_by[second].insert(it);
+            watch_new_clause(it);
         }
     }
 
     template <typename AssignmentClass>
     bool is_sat(const AssignmentClass& a) const {
-        for (auto clause_watchers : literals_watching) {
-            const watch_pair wp = clause_watchers.second;
+        for (int i = 0; i < cnf.clause_count; ++i) {
+            cnf_table::clause_iterator it = cnf.clauses.get()+i;
+            const watch_pair wp = literals_watching[it];
             if (!a.is_true(wp.watch1) && !a.is_true(wp.watch2)) {
                 return false;
             }
         }
+        //for (auto clause_watchers : literals_watching) {
+        //    const watch_pair wp = clause_watchers.second;
+        //    if (!a.is_true(wp.watch1) && !a.is_true(wp.watch2)) {
+        //        return false;
+        //    }
+        //}
         return true;
     }
 
@@ -94,8 +140,9 @@ class watched_literals {
     bool check_invariants(const AssignmentClass& a) {
 
         // each watch literal better be distinct from its partner.
-        for (auto&& clause_watchers : literals_watching) {
-            auto wp = clause_watchers.second;
+        for (int i = 0; i < cnf.clause_count; ++i) {
+            cnf_table::clause_iterator it = cnf.clauses.get()+i;
+            auto wp = literals_watching[it];
             ASSERT(wp.watch1 != wp.watch2);
             if (wp.watch1 == wp.watch2) {
                 return false;
@@ -122,9 +169,9 @@ class watched_literals {
             ASSERT(!has_error);
             if (has_error) { return false; }
         }
-        for (auto&& clauses_watchers : literals_watching) {
-            auto cit = clauses_watchers.first;
-            auto wp = clauses_watchers.second;
+        for (int i = 0; i < cnf.clause_count; ++i) {
+            cnf_table::clause_iterator cit = cnf.clauses.get()+i;
+            auto wp = literals_watching[cit];
 
             // The watchers better know they're watching this clause
             ASSERT(clauses_watched_by[wp.watch1].contains(cit));
@@ -140,9 +187,9 @@ class watched_literals {
         // next, we want to make sure that our data structure
         // is consistent with the invariants induced by the
         // assignment.
-        for (auto&& clause_watchers : literals_watching) {
-            auto cit = clause_watchers.first;
-            auto wp = clause_watchers.second;
+        for (int i = 0; i < cnf.clause_count; ++i) {
+            cnf_table::clause_iterator cit = cnf.clauses.get()+i;
+            auto wp = literals_watching[cit];
             // if both our watched literals are false, our whole
             // clause better be false.
             if (a.is_false(wp.watch1) && a.is_false(wp.watch2)) {
@@ -233,29 +280,29 @@ class watched_literals {
     }
 };
 
-std::ostream& operator<<(std::ostream& o, const watched_literals::lits_to_clauses_t& w) {
-    for (const auto& lit_clause_pair : pair_iter(w)) {
-        o << lit_clause_pair.first << " watching: ";
-        std::for_each(begin(lit_clause_pair.second), end(lit_clause_pair.second), [&](cnf_table::clause_iterator it) {
-            o << "(" << it << ") ";
-        });
-        o << std::endl;
-    }
-    return o;
-}
-
-std::ostream& operator<<(std::ostream& o, const watched_literals::clauses_to_lits_t& w) {
-    for (const auto& clause_to_watchers : w) {
-        o << clause_to_watchers.first << " watched by: " << "{ ";
-        o << clause_to_watchers.second.watch1 << ", " << clause_to_watchers.second.watch2 << "}" << std::endl;
-    }
-    return o;
-}
-
-std::ostream& operator<<(std::ostream& o, const watched_literals& w) {
-    o << w.clauses_watched_by << std::endl;
-    o << w.literals_watching << std::endl;
-    return o;
-}
+//std::ostream& operator<<(std::ostream& o, const watched_literals::lits_to_clauses_t& w) {
+//    for (const auto& lit_clause_pair : pair_iter(w)) {
+//        o << lit_clause_pair.first << " watching: ";
+//        std::for_each(begin(lit_clause_pair.second), end(lit_clause_pair.second), [&](cnf_table::clause_iterator it) {
+//            o << "(" << it << ") ";
+//        });
+//        o << std::endl;
+//    }
+//    return o;
+//}
+//
+//std::ostream& operator<<(std::ostream& o, const watched_literals::clauses_to_lits_t& w) {
+//    for (const auto& clause_to_watchers : w) {
+//        o << clause_to_watchers.first << " watched by: " << "{ ";
+//        o << clause_to_watchers.second.watch1 << ", " << clause_to_watchers.second.watch2 << "}" << std::endl;
+//    }
+//    return o;
+//}
+//
+//std::ostream& operator<<(std::ostream& o, const watched_literals& w) {
+//    o << w.clauses_watched_by << std::endl;
+//    o << w.literals_watching << std::endl;
+//    return o;
+//}
 
 #endif

@@ -26,43 +26,9 @@ public:
     T& operator[](const key_t k) {
         return data[k-offset];
     }
-
-    // hackneyed so it can be a drop-in replacement for a std::map (at least as
-    // I'm using std::map). Really should revisit for more efficient implementation.
-    struct iterator {
-        int my_index = 0;
-        const clause_map& my_map;
-        std::pair<cnf_table::clause_iterator, T> operator*() {
-            return std::make_pair(my_map.offset+my_index,my_map.data[my_index]);
-        }
-        iterator& operator++() {
-            my_index++;
-            return *this;
-        }
-        bool operator!=(const iterator& that) {
-            return this->my_index != that.my_index;
-        }
-    };
-
-    struct const_iterator {
-        int my_index = 0;
-        const clause_map& my_map;
-        std::pair<cnf_table::clause_iterator, T> operator*() {
-            return std::make_pair(my_map.offset+my_index, my_map.data[my_index]);
-        }
-        const_iterator& operator++() {
-            my_index++;
-            return *this;
-        }
-        bool operator!=(const const_iterator& that) {
-            return this->my_index != that.my_index;
-        }
-    };
-
-    //iterator begin() { return iterator{0, *this}; }
-    //iterator end() { return iterator{size, *this}; }
-    const_iterator begin() const { return const_iterator{0, *this}; }
-    const_iterator end()   const { return const_iterator{size, *this}; }
+    T operator[](const key_t k) const {
+        return data[k-offset];
+    }
 };
 
 #endif

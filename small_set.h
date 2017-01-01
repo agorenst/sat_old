@@ -1,7 +1,9 @@
 #ifndef SMALL_SET_H
 #define SMALL_SET_H
+
 #include <vector>
 #include <algorithm>
+
 template <typename T>
 class small_set {
     std::vector<T> data;
@@ -23,12 +25,27 @@ class small_set {
     typename std::vector<T>::iterator end() { return data.end(); }
     typename std::vector<T>::const_iterator begin() const { return data.begin(); }
     typename std::vector<T>::const_iterator end() const { return data.end(); }
+
+    void print(std::ostream& o) const {
+        std::for_each(std::begin(data), std::end(data), [&](const T& t) {
+            o << t << " ";
+        });
+    }
+    int size() const {
+        return data.size();
+    }
 };
 
 template <typename T>
 void swap_elt(small_set<T>& from, small_set<T>& to, const T t) {
     from.erase(t);
     to.insert(t);
+}
+
+template <typename T>
+std::ostream& operator<<(std::ostream& o, const small_set<T>& s) {
+    s.print(o);
+    return o;
 }
 
 #endif

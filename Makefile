@@ -18,4 +18,4 @@ simple_parser: simple_parser.cpp simple_parser.h
 	clang++ -Wall -O2 -std=c++14 simple_parser.cpp -c -o simple_parser.o
 
 clean:
-	rm -f *~ *.o literal_map_test cnf_table_test basic_dpll watched_literals_test dpll_with_watched collection_partition_test
+	rm -f *~ *.o literal_map_test cnf_table_test basic_dpll watched_literals_test dpll_with_watched collection_partition_test clause_learning

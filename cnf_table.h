@@ -37,9 +37,9 @@ public:
     // TODO: shouldn't use std::set here, I don't think.
     literal_map<std::set<clause_iterator>> literals_to_clauses;
 
-    cnf_table(size_t max_size, size_t max_clause_count, size_t max_literal_count):
-        max_size(max_size),
-        max_clause_count(max_clause_count),
+    cnf_table(size_t _max_size, size_t _max_clause_count, size_t max_literal_count):
+        max_size(_max_size*10),
+        max_clause_count(_max_clause_count*4),
         max_literal_count(max_literal_count),
         core_map(std::make_unique<literal[]>(max_size)),
         clauses(std::make_unique<clause[]>(max_clause_count)),
@@ -48,7 +48,7 @@ public:
 
     // Used for initializing the cnf_table.
     template <typename ClauseType>
-    void insert_clause(const ClauseType& c) {
+    clause_iterator insert_clause(const ClauseType& c) {
         raw_iterator clause_start = core_map.get() + size;
         for (auto x : c) {
             core_map[size++] = x;
@@ -61,6 +61,14 @@ public:
         for (auto x : c) {
             literals_to_clauses[x].insert(clauses.get()+(clause_count-1));
         }
+        return clauses.get()+(clause_count-1);
+    }
+
+    int remaining_size() const {
+        return max_size - size;
+    }
+    int remaining_clauses() const {
+        return max_clause_count - clause_count;
     }
 
     bool check_invariants();

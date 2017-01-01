@@ -2,6 +2,39 @@
 
 #include <iostream>
 
+#include <stack>
+#include "small_set.h"
+
+class assignment {
+    int decision_level = 0;
+    public:
+    // decide a new decision and push it on the stack.
+    void push_decision(literal l) {
+    }
+    literal pop_decision();
+    bool can_flip_decision() const;
+};
+
+class assignment {
+    private:
+    std::stack<small_set<literal>> remaining_literals;
+    literal_map<bool> is_decision;
+    literal_map<int> decision_level;
+    literal_map<bool> is_assigned_true;
+    public:
+    assignment(literal max_literal):
+        is_decision(max_literal*2),
+        decision_level(max_literal*2),
+        is_assigned_true(max_literal*2) {
+
+        for (literal l : key_iter(is_assigned_true)) {
+            is_assigned_true[l] = false;
+            is_decision[l] = false;
+            decision_level[l] = -1;
+        }
+    }
+};
+
 class assignment {
     private:
     int next_variable = 1;
@@ -29,6 +62,11 @@ class assignment {
         is_assigned_true[l] = true;
         decision_levels[l] = decision_level;
     }
+
+    int get_decision_level(literal l) {
+        return decision_levels[l];
+    };
+
     void set_decision_level(int dl) { decision_level = dl; }
     int get_next_unassigned() {
         while (!is_unassigned(next_variable)) { ++next_variable; }
