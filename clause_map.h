@@ -1,13 +1,13 @@
 #ifndef CLAUSE_MAP_H
 #define CLAUSE_MAP_H
 
+#include "debug.h"
 #include "cnf_table.h"
 
 
 // Basically, maps clause_iterator -> T.
 // This exploits the fact that clause_iterators are random-access iterators.
 // Thus, the function "iterator - start_iterator" maps iterators to array indices.
-// TODO: static-assert that (not really a big deal, I'm the only maintainer..)
 template<typename T>
 class clause_map {
 private:
@@ -26,9 +26,15 @@ public:
     T& operator[](const key_t k) {
         return data[k-offset];
     }
-    T operator[](const key_t k) const {
+    T get_copy(const key_t k) const {
         return data[k-offset];
     }
+
+    key_t first_index() const { return offset; }
+    key_t last_index() const { return offset+size; }
+
+    T* first_value_iter() { return data.get(); }
+    T* last_value_iter() { return data.get()+size; }
 };
 
 #endif

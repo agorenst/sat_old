@@ -6,12 +6,20 @@
 
 template <typename T>
 class small_set {
+    // Because we use a vector underlying everything, we get value
+    // semantics (and bad things like iterator invalidation) for free.
     std::vector<T> data;
     public:
     void insert(const T& t) {
         if (contains(t)) { return; }
         data.push_back(t);
     }
+
+    template <typename Iter>
+    void insert(Iter start, Iter finish) {
+        std::for_each(start, finish, [&](const T& t) { this->insert(t); });
+    }
+    void clear() { data.clear(); }
     void erase(const T& t) {
         auto iter_to_remove = std::find(std::begin(data), std::end(data), t);
         ASSERT(iter_to_remove != std::end(data));

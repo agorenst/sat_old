@@ -2,20 +2,21 @@
 #define CNF_TABLE_H
 
 #include "literal_map.h"
-#include "simple_parser.h"
+#include "debug.h"
 
-#include <set>
 #include <memory>
 #include <iostream>
 #include <algorithm>
 
-#ifdef USE_ASSERT
-#include <cassert>
-#define ASSERT(x) assert(x)
-#else
-#define ASSERT(x)
-#endif
-
+// The core CNF data structure. For now I'm slightly designing for efficiency,
+// but I'm not sure if this is the "final" design. For now it's a big flat static
+// array of values.
+//
+// The "core map" is a contiguous list of literals expressing the clauses. Clauses
+// are defined by pairs of iterators into the core map, delimiting the beginning
+// and ending of that clause.
+//
+// We (currently) statically allocate the memory we'd like up-front.
 class cnf_table {
 public:
     const int max_size;
@@ -34,21 +35,18 @@ public:
 
     std::unique_ptr<clause[]> clauses;
 
-    // TODO: shouldn't use std::set here, I don't think.
-    literal_map<std::set<clause_iterator>> literals_to_clauses;
-
     cnf_table(size_t _max_size, size_t _max_clause_count, size_t max_literal_count):
         max_size(_max_size*10),
         max_clause_count(_max_clause_count*4),
         max_literal_count(max_literal_count),
         core_map(std::make_unique<literal[]>(max_size)),
-        clauses(std::make_unique<clause[]>(max_clause_count)),
-        literals_to_clauses(max_literal_count)
+        clauses(std::make_unique<clause[]>(max_clause_count))
     {}
 
     // Used for initializing the cnf_table.
     template <typename ClauseType>
     clause_iterator insert_clause(const ClauseType& c) {
+
         raw_iterator clause_start = core_map.get() + size;
         for (auto x : c) {
             core_map[size++] = x;
@@ -58,41 +56,30 @@ public:
         ASSERT(clause_end <= core_map.get()+max_size);
 
         clauses[clause_count++] = {clause_start, clause_end};
-        for (auto x : c) {
-            literals_to_clauses[x].insert(clauses.get()+(clause_count-1));
-        }
+
         return clauses.get()+(clause_count-1);
     }
 
-    int remaining_size() const {
-        return max_size - size;
-    }
-    int remaining_clauses() const {
-        return max_clause_count - clause_count;
-    }
+    clause_iterator clause_begin() const { return clauses.get(); }
+    clause_iterator clause_end() const { return clauses.get() + clause_count; }
 
-    bool check_invariants();
+    // If we're learning a clause, we may want to see if it would actually
+    // fit in our database...
+    int remaining_size() const { return max_size - size; }
+    int remaining_clauses() const { return max_clause_count - clause_count; }
+
 };
 
+// Iterating over a CNF means iterating over its clauses.
+cnf_table::clause_iterator end(const cnf_table& c) { return c.clause_end(); }
+cnf_table::clause_iterator begin(const cnf_table& c) { return c.clause_begin(); }
+
+// We want to be able to iterate over clauses, or the clause iterators themselves.
 cnf_table::raw_iterator begin(const cnf_table::clause& c) { return c.start; }
 cnf_table::raw_iterator end(const cnf_table::clause& c) { return c.finish; }
 cnf_table::raw_iterator begin(const cnf_table::clause_iterator& c) { return c->start; }
 cnf_table::raw_iterator end(const cnf_table::clause_iterator& c) { return c->finish; }
 
-class clause_iteration {
-    const cnf_table& c;
-    public:
-    clause_iteration(const cnf_table& c): c(c) {}
-    typedef cnf_table::clause_iterator iterator;
-
-    iterator begin() { return c.clauses.get(); }
-    iterator end() { return c.clauses.get() + c.clause_count; }
-};
-
-
-clause_iteration iterate_clauses(const cnf_table& c) {
-    return clause_iteration(c);
-}
 
 std::ostream& operator<<(std::ostream& o, const cnf_table::clause& c) {
     std::for_each(begin(c), end(c), [&](literal l) {
@@ -111,31 +98,5 @@ std::ostream& operator<<(std::ostream& o, const cnf_table& cnf) {
     });
     return o;
 }
-
-
-bool cnf_table::check_invariants() {
-    // For every literal in each clause, that literal knows
-    // it's in that clause.
-    for (clause_iterator cit = clauses.get();
-            cit != clauses.get() + clause_count;
-            ++cit) {
-        for (literal l : *cit) {
-            if (literals_to_clauses[l].find(cit) == literals_to_clauses[l].end()) {
-                return false;
-            }
-        }
-    }
-    // For every literal, every clause that literal thinks it's in
-    // actually contains that literal.
-    for (literal l : key_iter(literals_to_clauses)) {
-        for (clause_iterator cit : literals_to_clauses[l]) {
-            auto find_result = std::find(begin(cit), end(cit), l);
-            if (find_result == end(cit)) {
-                return false;
-            }
-        }
-    }
-    return true;
-};
 
 #endif
