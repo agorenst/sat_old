@@ -2,21 +2,27 @@
 #define CNF_TABLE_H
 
 #include "literal_map.h"
+#include "small_set.h"
 #include "debug.h"
 
 #include <memory>
 #include <iostream>
 #include <algorithm>
 
-// The core CNF data structure. For now I'm slightly designing for efficiency,
-// but I'm not sure if this is the "final" design. For now it's a big flat static
-// array of values.
+// A CNF is a sequence of clauses.
+// A clause is a sequence of literals.
 //
-// The "core map" is a contiguous list of literals expressing the clauses. Clauses
-// are defined by pairs of iterators into the core map, delimiting the beginning
-// and ending of that clause.
+// For efficiency/sanity, its useful to associate each clause with a unique key.
 //
-// We (currently) statically allocate the memory we'd like up-front.
+// In this implementation, we have a flat array of literals, and a sequence of
+// [begin, end) pairs that define the clauses over that flat array.
+//
+// Thus, a clause is simply a pair of pointers, and the clause is uniquely
+// identified by the address of that pair (we define it as a clause_iterator).
+//
+// Under models where we may reallocate memory, the clause iterators may be
+// invalidated -- just be aware.
+
 class cnf_table {
 public:
     const int max_size;
@@ -75,12 +81,111 @@ cnf_table::clause_iterator end(const cnf_table& c) { return c.clause_end(); }
 cnf_table::clause_iterator begin(const cnf_table& c) { return c.clause_begin(); }
 
 // We want to be able to iterate over clauses, or the clause iterators themselves.
+// Perhaps equating clause iterators and clauses are not ideal, but...
 cnf_table::raw_iterator begin(const cnf_table::clause& c) { return c.start; }
 cnf_table::raw_iterator end(const cnf_table::clause& c) { return c.finish; }
 cnf_table::raw_iterator begin(const cnf_table::clause_iterator& c) { return c->start; }
 cnf_table::raw_iterator end(const cnf_table::clause_iterator& c) { return c->finish; }
 
 
+// Helper functions over clauses and CNF tables.
+// Everything is templated because we want to be compatible with any object
+// that implements the appropriate "interface" (a clause is a seq of literals,
+// and a cnf is a seq of clauses).
+
+// A clause is trivial if it contains the negation of
+// one of its own literals.
+template <typename ClauseIter>
+bool is_trivial_clause(ClauseIter start, ClauseIter finish) {
+    return std::any_of(start, finish, [&](literal l) {
+        return std::find(start, finish, -l) != finish;
+    });
+}
+
+// The definition of resolving.
+// For now we always return a small_set, but maybe we can do something else.
+template <typename ClauseIterA, typename ClauseIterB>
+small_set<literal> resolve(ClauseIterA start_a,
+                           ClauseIterA finish_a,
+                           ClauseIterB start_b,
+                           ClauseIterB finish_b,
+                           literal pivot) {
+    small_set<literal> resolvent;
+
+    // The pivot must be in a, but not its negation.
+    ASSERT(std::find(start_a, finish_a, pivot) != finish_a);
+    ASSERT(std::find(start_a, finish_a, -pivot) == finish_a);
+
+    // The negation of the pivot must be in b, but not itself.
+    ASSERT(std::find(start_b, finish_b, -pivot) != finish_b);
+    ASSERT(std::find(start_b, finish_b, pivot) == finish_b);
+
+    std::for_each(start_a, finish_a, [&](literal l) {
+        if (l != pivot) resolvent.insert(l);
+    });
+    std::for_each(start_b, finish_b, [&](literal l) {
+        if (l != -pivot) resolvent.insert(l);
+    });
+
+    ASSERT(!is_trivial_clause(std::begin(resolvent), std::end(resolvent)));
+    return resolvent;
+}
+template <typename ClauseA, typename ClauseB>
+small_set<literal> resolve(const ClauseA& ca, const ClauseB& cb, literal pivot) {
+    return resolve(std::begin(ca), std::end(ca),
+                   std::begin(cb), std::end(cb),
+                   pivot);
+}
+
+// Relative to an assignment (the interface defined in assignment.h),
+// we can determine if a clause is satisfied, etc...
+
+template <typename ClauseIter, typename Assignment>
+bool is_clause_satisfied(ClauseIter start, ClauseIter finish, const Assignment& a) {
+    // NOTE: std::any_of returns false for empty sequence.
+    // This is consistent with what we want, under self-reduction model of CNF.
+    return std::any_of(start, finish, [&a](literal l) { return a.is_true(l); });
+}
+template <typename C, typename A>
+bool is_clause_satisfied(const C& c, const A& a) {
+    return is_clause_satisfied(begin(c), end(c), a);
+}
+
+template <typename ClauseIter, typename Assignment>
+bool is_clause_unsatisfied(ClauseIter start, ClauseIter finish, const Assignment& a) {
+    // NOTE: all of returns true for empty sequence.
+    // This is consistent with what we want, under self-reduction model.
+    return std::all_of(start, finish, [&a](literal l) { return a.is_false(l); });
+}
+template <typename C, typename A>
+bool is_clause_unsatisfied(const C& c, const A& a) {
+    return is_clause_unsatisfied(std::begin(c), std::end(c), a);
+}
+
+template <typename CNFIter, typename Assignment>
+bool is_cnf_satisfied(CNFIter start, CNFIter finish, const Assignment& a) {
+    return std::all_of(start, finish, [&a](auto cl) {
+        return is_clause_satisfied(begin(cl), end(cl), a);
+    });
+}
+template <typename C, typename A>
+bool is_cnf_satisfied(const C& c, const A& a) {
+    return is_cnf_satisfied(begin(c), end(c), a);
+}
+
+template <typename CNFIter, typename Assignment>
+CNFIter has_conflict(CNFIter start, CNFIter finish, const Assignment& a) {
+    return std::find_if(start, finish, [&a](auto cl) {
+        return is_clause_unsatisfied(begin(cl), end(cl), a);
+    });
+}
+template <typename C, typename A>
+auto has_conflict(const C& c, const A& a) {
+    return has_conflict(begin(c), end(c), a);
+}
+
+
+// Printing statements, mainly for debugging.
 std::ostream& operator<<(std::ostream& o, const cnf_table::clause& c) {
     std::for_each(begin(c), end(c), [&](literal l) {
         o << l << " ";
