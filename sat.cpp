@@ -19,11 +19,12 @@ small_set<literal> find_conflict_augment(const cnf_table& c,
     if (conflict_clause != end(c)) {
         result.insert(begin(conflict_clause), end(conflict_clause));
     }
-    else if (new_parent.size() && is_clause_unsatisfied(new_parent, a)) {
+    else if (new_parent.size() && is_clause_unsatisfied(begin(new_parent), end(new_parent), a)) {
         result.insert(begin(new_parent), end(new_parent));
     }
     return result;
 }
+
 
 // This is the main SSS implementation.
 bool solve(cnf_table& c) {
@@ -36,58 +37,94 @@ bool solve(cnf_table& c) {
     small_set<literal> new_parent;
     std::vector<small_set<literal>> Parent(c.max_literal_count);
     for (;;) {
+        trace("main iteration start\n");
 
         // We do this before decisions because on some inputs
         // e.g., inputs/aim-100-1_6-yes1-4.cnf, we assert because
         // I guess we need to flip the variable before it's actually
         // SAT. So we'd make a 101st decision, null deref.
         if (is_cnf_satisfied(c, a)) {
+            trace("done, cnf satisfied by ", a, "\n");
             return true;
         }
 
         new_parent.clear();
 
         // Choose a new decision variable.
-        literal next_decision = d.decisions[d.level];
-        d.left_right[d.level] = L;
-        a.set_true(next_decision);
+        //std::transform(d.decisions.get()+d.level, d.decisions.get()+d.max_literal,
+        //               d.decisions.get()+d.level,
+        //               [](literal l) { return std::abs(l); });
+        //std::sort(d.decisions.get()+d.level, d.decisions.get()+d.max_literal);
+
+        literal unit = find_unit_in_cnf(c, a);
+        if (unit) {
+            ASSERT(a.is_unassigned(unit));
+            auto to_swap = std::find_if(d.decisions.get(),
+                                        d.decisions.get()+d.max_literal,
+                                        [unit](literal l) {
+                                return std::abs(l) == std::abs(unit);
+                           });
+            ASSERT(to_swap >= d.decisions.get()+d.level);
+            ASSERT(to_swap < d.decisions.get()+d.max_literal);
+            std::swap(d.decisions[d.level], *to_swap);
+            d.left_right[d.level] = L;
+            ASSERT(std::abs(d.decisions[d.level]) == std::abs(unit));
+            d.decisions[d.level] = -unit; // set it to the right sign.
+            trace("unit: ", d.decisions[d.level], "\n");
+            a.set_true(d.decisions[d.level]);
+        }
+        else {
+            trace("choosing literal for decision level: ", d.level, "\n");
+            literal next_decision = d.decisions[d.level];
+            d.left_right[d.level] = L;
+            trace("chose ", next_decision, "\n");
+            a.set_true(next_decision);
+        }
 
         for (;;) {
             // Find a conflict clause if it exists
             const auto parent_clause = find_conflict_augment(c, new_parent, a);
-            if (!parent_clause.size()) { break; }
+            if (!parent_clause.size()) {
+                trace("no conflict on current decision ", d, " breaking\n");
+                break;
+            }
+            trace("conflict with clause ", parent_clause, "\n");
 
             //////////////////////////////////////////////////////////////////
             // NCB STARTS HERE
+            //
+            // When we get here we've already committed to flipping the literal.
+            //
             // Extra conditional: make sure the conflict is worthwhile...
             if (parent_clause.size() > 1) {
                 int g = d.level;
                 auto NCB_clause = parent_clause;
-                ASSERT(NCB_clause.contains(-d.decisions[g]));
-                NCB_clause.erase(-d.decisions[g]);
+                ASSERT(NCB_clause.contains(-d.decisions[d.level]));
+                NCB_clause.erase(-d.decisions[d.level]);
 
                 // find the minimal g such that the NCB clause is still unsat...
-                while (is_clause_unsatisfied(NCB_clause, a)) {
+                do {
                     a.unassign(d.decisions[g]);
                     --g;
-                }
+                } while (is_clause_unsatisfied(begin(NCB_clause), end(NCB_clause), a));
+                ASSERT(!is_clause_unsatisfied(begin(NCB_clause), end(NCB_clause), a));
                 ++g;
-                ASSERT(!is_clause_unsatisfied(NCB_clause, a));
                 a.set_true(d.decisions[g]);
-                ASSERT(is_clause_unsatisfied(NCB_clause, a));
+                ASSERT(is_clause_unsatisfied(begin(NCB_clause), end(NCB_clause), a));
 
-
-                // OPTIONAL, continue backtracking up implied literals.
-                //for (--g; d.left_right[g] == R; --g);
+                // Optional is to move forward past all the R variables.
+                // TODO: do that.
 
                 // Now we finish backtracking:
+                trace("NCB backtracked to level ", g, "\n");
+                trace("current decisions: ", d, "\n");
                 ASSERT(g+1 <= d.level);
                 // To avoid infinite looping, we only backtrack when we're reordering
                 // decision variables "backwards". This is built off the idea that we
                 // assign literals from abs(1) ... abs(max_variable), and avoids
                 // us getting in an infinite loop where we swap -8 with 14 and then
                 // 14 with -8. This would come up in the UNSAT cases.
-                if (std::abs(d.decisions[g+1]) >= std::abs(d.decisions[d.level])) {
+                if (std::abs(d.decisions[g+1]) > std::abs(d.decisions[d.level])) {
                     // NCB is bad,
                     // Reset all our NCB.
                     for (; g+1 < d.level; ++g) {
@@ -102,17 +139,22 @@ bool solve(cnf_table& c) {
                     std::swap(d.decisions[g+1],d.decisions[d.level]);
                     a.set_true(d.decisions[g+1]);
                     d.level = g+1;
+                    trace("level is now: ", d.level, " with decision ", d.decisions[d.level], "\n");
                 }
             }
             // NCB ENDS HERE
             //////////////////////////////////////////////////////////////////
 
+            trace("Parent[", d.level, "] = ", parent_clause, "\n");
+            ASSERT(is_clause_unsatisfied(begin(parent_clause), end(parent_clause), a));
+            ASSERT(parent_clause.contains(-d.decisions[d.level]));
             Parent[d.level] = parent_clause;
             // The above lines basically transform the for(;;) loop into a
             // "while there is a conflict clause..." loop.
 
 
             literal to_flip = d.decisions[d.level];
+            trace("flipping literal: ", to_flip, "\n");
 
             // flip the assignment...
             a.unassign(to_flip);
@@ -125,26 +167,33 @@ bool solve(cnf_table& c) {
             auto conflict_clause = has_conflict(begin(c), end(c), a);
 
             if (conflict_clause != end(c)) {
+                trace("After flipping, still has conflict: ", conflict_clause, "\n");
                 // In the Dershowitz Nadel SSS, new_parent is actually an index
                 // (i.e., clause_iterator in our parlance), but because I'm not
                 // yet building the conflict graph I'm going to copy it explicitly.
                 new_parent.clear();
                 new_parent.insert(begin(conflict_clause), end(conflict_clause));
+                trace("new parent: ", new_parent, "\n");
 
                 literal level_literal = d.decisions[d.level];
+                trace("level literal: ", d.decisions[d.level], "\n");
                 while (d.level >= 0 && (d.left_right[d.level] == R ||
                                         !new_parent.contains(-level_literal))) {
 
                     // if the new parent contains -level_literal, then it must be
                     // able to be resolved with Parent[d.level].
                     if (d.left_right[d.level] == R && new_parent.contains(-level_literal)) {
+                        trace("parent resolution possible against", Parent[d.level],  "\n");
                         new_parent = resolve(Parent[d.level], new_parent, level_literal);
+                        trace("new parent: ", new_parent, "\n");
                     }
                     a.unassign(d.decisions[d.level]);
+                    // Uncommenting this leads to a 3x slowdown. Why?
                     //d.decisions[d.level] = std::abs(d.decisions[d.level]);
                     d.level--;
 
                     level_literal = d.decisions[d.level];
+                    trace("level literal: ", d.decisions[d.level], "\n");
                 }
                 if (d.level == -1) { return false; }
             }

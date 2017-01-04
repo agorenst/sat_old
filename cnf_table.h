@@ -159,7 +159,7 @@ bool is_clause_unsatisfied(ClauseIter start, ClauseIter finish, const Assignment
 }
 template <typename C, typename A>
 bool is_clause_unsatisfied(const C& c, const A& a) {
-    return is_clause_unsatisfied(std::begin(c), std::end(c), a);
+    return is_clause_unsatisfied(begin(c), end(c), a);
 }
 
 template <typename CNFIter, typename Assignment>
@@ -182,6 +182,34 @@ CNFIter has_conflict(CNFIter start, CNFIter finish, const Assignment& a) {
 template <typename C, typename A>
 auto has_conflict(const C& c, const A& a) {
     return has_conflict(begin(c), end(c), a);
+}
+
+// Absolutely dead-stupid way of finding unit clauses...
+template <typename C, typename A>
+literal is_unit_clause_implying(const C& c, const A& a) {
+    if (is_clause_satisfied(c, a)) { return 0; }
+    if (is_clause_unsatisfied(c, a)) { return 0; }
+
+    auto l_ptr = std::find_if(begin(c), end(c), [&](literal l) {
+        return a.is_unassigned(l);
+    });
+    auto nextl = std::find_if(l_ptr+1, end(c), [&](literal l) {
+        return a.is_unassigned(l);
+    });
+    ASSERT(l_ptr != end(c));
+    if (nextl == end(c)) { return *l_ptr; }
+    return 0;
+}
+
+template <typename A>
+literal find_unit_in_cnf(const cnf_table& c, const A& a) {
+    for (auto cit = begin(c);
+         cit != end(c);
+         ++cit) {
+        literal u = is_unit_clause_implying(cit, a);
+        if (u) { return u; }
+    }
+    return 0;
 }
 
 
