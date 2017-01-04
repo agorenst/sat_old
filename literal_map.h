@@ -33,7 +33,6 @@ public:
         // iteration pattern, because of potential cache misses. Do we
         // group (x, -x) closely, or (x, x+1) closely?
         int index = literal_to_index(i);
-        TRACE("literal_map:operator[](%d), accessing elt: %d\n", i, index);
         return data[index];
     }
     T get_copy(literal i) const {
@@ -41,7 +40,6 @@ public:
         // iteration pattern, because of potential cache misses. Do we
         // group (x, -x) closely, or (x, x+1) closely?
         int index = literal_to_index(i);
-        TRACE("literal_map:get_copy(%d), accessing elt: %d\n", i, index);
         return data[index];
     }
 

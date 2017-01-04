@@ -30,6 +30,8 @@ class assignment {
         is_assigned_true(literal_count)
     {}
 
+    void print(std::ostream& o) const;
+
     private:
     literal_map<bool> is_assigned_true;
 };
@@ -49,3 +51,18 @@ void assignment::unassign(literal l) {
     is_assigned_true[l] = false;
     is_assigned_true[-l] = false;
 };
+
+void assignment::print(std::ostream& o) const {
+    for (literal i = is_assigned_true.first_index();
+         i != is_assigned_true.end_index();
+         ++i) {
+        if (is_assigned_true.get_copy(i)) {
+            o << i << " ";
+        }
+    }
+}
+
+std::ostream& operator<<(std::ostream& o, const assignment& a) {
+    a.print(o);
+    return o;
+}

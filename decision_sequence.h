@@ -2,6 +2,8 @@
 
 #include <memory>
 
+#include <iostream>
+
 class decision_sequence {
     public:
     const int max_literal;
@@ -24,3 +26,23 @@ class decision_sequence {
     }
     int level = 0;
 };
+
+std::ostream& operator<<(std::ostream& o, const decision_sequence::LRSTATUS s) {
+    if (s == decision_sequence::LRSTATUS::LEFT) {
+        return o << "L";
+    }
+    else {
+        return o << "R";
+    }
+}
+
+std::ostream& operator<<(std::ostream& o, const decision_sequence& d) {
+    for (int i = 0; i < d.level+1; ++i) {
+        o << d.decisions[i] << "(" << i << "," << d.left_right[i] << ") ";
+    }
+    o << "| ";
+    for (int i = d.level+1; i < d.max_literal; ++i) {
+        o  << d.decisions[i] << " ";
+    }
+    return o;
+}
