@@ -197,6 +197,44 @@ bool solve(cnf_table& c) {
                     d.level--;
 
                     /////////////////////////////////////////////////
+                    // CONFLICT DIRECTED BACKJUMPING
+                    if (new_parent.contains(-d.decisions[d.level])) {
+                        int g = -1;
+                        for (int i = d.level; i >= 0; --i) {
+                            if (d.left_right[i] == L) {
+                                g = i;
+                                break;
+                            }
+                        }
+                        //ASSERT(g != -1);
+                        ASSERT(g <= d.level);
+                        // g is the highest left-decision level.
+
+                        if (g >= 0 && g < d.level) {
+                            bool clause_still_unsat = std::all_of(begin(new_parent),
+                                    end(new_parent),
+                                    [&](literal l) {
+                                    if (l == -d.decisions[d.level]) { return true; }
+                                    for (int i = 0; i < g; ++i) {
+                                    if (-d.decisions[i] == l) { return true; }
+                                    }
+                                    return false;
+                                    });
+
+                            if (clause_still_unsat) {
+                                std::swap(d.decisions[g], d.decisions[d.level]);
+                                for (int i = d.level; i > g; --i) {
+                                    a.unassign(d.decisions[i]);
+                                }
+                                Parent[g] = new_parent;
+                                d.level = g;
+                            }
+                        }
+                    }
+                    //
+                    /////////////////////////////////////////////////
+
+                    /////////////////////////////////////////////////
                     // CONFLICT CLAUSE RECORDING
                     if (d.left_right[d.level] == L &&
                         new_parent.contains(-d.decisions[d.level]) &&
