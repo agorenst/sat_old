@@ -56,6 +56,8 @@ bool solve(cnf_table& c) {
         //               [](literal l) { return std::abs(l); });
         //std::sort(d.decisions.get()+d.level, d.decisions.get()+d.max_literal);
 
+        //////////////////////////////////////////////////////////////////
+        // PROPOGATING SIMPLE UNITS STARTS HERE
         literal unit = find_unit_in_cnf(c, a);
         if (unit) {
             ASSERT(a.is_unassigned(unit));
@@ -73,6 +75,8 @@ bool solve(cnf_table& c) {
             trace("unit: ", d.decisions[d.level], "\n");
             a.set_true(d.decisions[d.level]);
         }
+        //
+        //////////////////////////////////////////////////////////////////
         else {
             trace("choosing literal for decision level: ", d.level, "\n");
             literal next_decision = d.decisions[d.level];
@@ -191,6 +195,17 @@ bool solve(cnf_table& c) {
                     // Uncommenting this leads to a 3x slowdown. Why?
                     //d.decisions[d.level] = std::abs(d.decisions[d.level]);
                     d.level--;
+
+                    /////////////////////////////////////////////////
+                    // CONFLICT CLAUSE RECORDING
+                    if (d.left_right[d.level] == L &&
+                        new_parent.contains(-d.decisions[d.level]) &&
+                        c.clause_count < c.max_clause_count &&
+                        c.size + new_parent.size() < c.max_size) {
+                        c.insert_clause(new_parent);
+                    }
+                    //
+                    /////////////////////////////////////////////////
 
                     level_literal = d.decisions[d.level];
                     trace("level literal: ", d.decisions[d.level], "\n");
