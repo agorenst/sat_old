@@ -24,6 +24,9 @@ class decision_sequence {
             left_right[i] = LRSTATUS::LEFT;
         }
     }
+
+    literal level_literal() const { return decisions[level]; }
+    LRSTATUS level_direction() const { return left_right[level]; }
     int level = 0;
 };
 

@@ -1,0 +1,5 @@
+c this demonstrates how NCB naively (when we always choose the lowest,
+c positive available literal) can loop forever. Something seems fishy.
+1 2 0
+-2 -3 0
+-2 -4 0

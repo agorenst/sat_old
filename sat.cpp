@@ -28,7 +28,12 @@ small_set<literal> find_conflict_augment(const cnf_table& c,
 
 // This is the main SSS implementation.
 bool solve(cnf_table& c) {
+    trace("starting main solver\n");
+    
+    // TODO: push the Parent sequence into the decision_sequence.
     decision_sequence d(c.max_literal_count);
+
+    // TODO: clean this up.
     const auto L = decision_sequence::LRSTATUS::LEFT;
     const auto R = decision_sequence::LRSTATUS::RIGHT;
     assignment a(c.max_literal_count);
@@ -38,6 +43,8 @@ bool solve(cnf_table& c) {
     std::vector<small_set<literal>> Parent(c.max_literal_count);
     for (;;) {
         trace("main iteration start\n");
+        trace("current assignment: ", a, "\n");
+        new_parent.clear();
 
         // We do this before decisions because on some inputs
         // e.g., inputs/aim-100-1_6-yes1-4.cnf, we assert because
@@ -48,44 +55,46 @@ bool solve(cnf_table& c) {
             return true;
         }
 
-        new_parent.clear();
-
-        // Choose a new decision variable.
-        //std::transform(d.decisions.get()+d.level, d.decisions.get()+d.max_literal,
-        //               d.decisions.get()+d.level,
-        //               [](literal l) { return std::abs(l); });
-        //std::sort(d.decisions.get()+d.level, d.decisions.get()+d.max_literal);
 
         //////////////////////////////////////////////////////////////////
         // PROPOGATING SIMPLE UNITS STARTS HERE
         literal unit = find_unit_in_cnf(c, a);
         if (unit) {
+            trace("unit literal found: ", unit, "\n");
             ASSERT(a.is_unassigned(unit));
+
+            // maintain our current way of choosing literals.
+            // TODO: this should ultimately be deprecated with better literal
+            // selection.
             auto to_swap = std::find_if(d.decisions.get(),
                                         d.decisions.get()+d.max_literal,
                                         [unit](literal l) {
                                 return std::abs(l) == std::abs(unit);
                            });
+            // we haven't chosen as our unit an already-assigned variable.
             ASSERT(to_swap >= d.decisions.get()+d.level);
             ASSERT(to_swap < d.decisions.get()+d.max_literal);
+
+            // set the unit to our next-to-assign state.
             std::swap(d.decisions[d.level], *to_swap);
-            d.left_right[d.level] = L;
+            d.left_right[d.level] = L; // we know it will actually be R soon enough.
             ASSERT(std::abs(d.decisions[d.level]) == std::abs(unit));
             d.decisions[d.level] = -unit; // set it to the right sign.
-            trace("unit: ", d.decisions[d.level], "\n");
+            trace("choice induced by unit: ", d.decisions[d.level], "\n");
             a.set_true(d.decisions[d.level]);
         }
         //
         //////////////////////////////////////////////////////////////////
         else {
             trace("choosing literal for decision level: ", d.level, "\n");
-            literal next_decision = d.decisions[d.level];
+            d.decisions[d.level] = d.decisions[d.level];
             d.left_right[d.level] = L;
-            trace("chose ", next_decision, "\n");
-            a.set_true(next_decision);
+            trace("chose ", d.decisions[d.level], "\n");
+            a.set_true(d.decisions[d.level]);
         }
 
         for (;;) {
+            trace("entering conflict loop\n");
             // Find a conflict clause if it exists
             const auto parent_clause = find_conflict_augment(c, new_parent, a);
             if (!parent_clause.size()) {
@@ -96,55 +105,64 @@ bool solve(cnf_table& c) {
 
             //////////////////////////////////////////////////////////////////
             // NCB STARTS HERE
-            //
-            // When we get here we've already committed to flipping the literal.
-            //
-            // Extra conditional: make sure the conflict is worthwhile...
-            if (parent_clause.size() > 1) {
-                int g = d.level;
-                auto NCB_clause = parent_clause;
-                ASSERT(NCB_clause.contains(-d.decisions[d.level]));
-                NCB_clause.erase(-d.decisions[d.level]);
+            // OK, this rewrite is super gnarly, but it seems at least to always
+            // terminate. I'm sure a second look will clean things up a lot, but
+            // I need to let this bake in more.
+            int orig_level = d.level;
+            auto NCB_clause = parent_clause;
+            literal needed_flip = -d.level_literal();
+            ASSERT(NCB_clause.contains(needed_flip));
+            NCB_clause.erase(needed_flip);
 
-                // find the minimal g such that the NCB clause is still unsat...
+
+            trace("Before backtracking: ", d, "\n");
+            // We have a conflict, so we must undo at least one iteration.
+            trace("undoing: ");
+            do {
+                trace(d.level_literal(), " ");
+                a.unassign(d.level_literal());
+                d.level--;
+            }
+            while (NCB_clause.size() &&
+                   is_clause_unsatisfied(begin(NCB_clause), end(NCB_clause), a));
+            trace("\n");
+            // Weird case: if parent_clause is unit (i.e., NCB_clause is empty), we
+            // still want to iterate at least once, but no more.
+            d.level++;
+            a.set_true(d.level_literal());
+
+            if (d.level < orig_level) {
+                trace("redoing: ");
                 do {
-                    a.unassign(d.decisions[g]);
-                    --g;
-                } while (is_clause_unsatisfied(begin(NCB_clause), end(NCB_clause), a));
-                ASSERT(!is_clause_unsatisfied(begin(NCB_clause), end(NCB_clause), a));
-                ++g;
-                a.set_true(d.decisions[g]);
+                    d.level++;
+                    a.set_true(d.level_literal());
+                    trace(d.level_literal(), " ");
+                    trace("curdir:(", d.level_direction(), ") ");
+                    ASSERT(!NCB_clause.size() ||
+                            is_clause_unsatisfied(begin(NCB_clause), end(NCB_clause), a));
+                } while (d.level < orig_level &&
+                        d.level_direction() == R);
+                trace("\n");
+            }
+
+            trace("After backtracking: ", d, "\n");
+            // Make sure I understand what happens in the unit-clause case:
+            ASSERT(    NCB_clause.size()
+                   || (   is_clause_unsatisfied(begin(parent_clause), end(parent_clause), a)
+                       && orig_level == d.level));
+
+            if (d.level < orig_level) {
+                ASSERT(d.level_direction() == L);
                 ASSERT(is_clause_unsatisfied(begin(NCB_clause), end(NCB_clause), a));
-
-                // Optional is to move forward past all the R variables.
-                // TODO: do that.
-
-                // Now we finish backtracking:
-                trace("NCB backtracked to level ", g, "\n");
-                trace("current decisions: ", d, "\n");
-                ASSERT(g+1 <= d.level);
-                // To avoid infinite looping, we only backtrack when we're reordering
-                // decision variables "backwards". This is built off the idea that we
-                // assign literals from abs(1) ... abs(max_variable), and avoids
-                // us getting in an infinite loop where we swap -8 with 14 and then
-                // 14 with -8. This would come up in the UNSAT cases.
-                if (std::abs(d.decisions[g+1]) > std::abs(d.decisions[d.level])) {
-                    // NCB is bad,
-                    // Reset all our NCB.
-                    for (; g+1 < d.level; ++g) {
-                        a.set_true(d.decisions[g+1]);
-                    }
-                    a.set_true(d.decisions[g+1]);
-                    ASSERT(g+1 == d.level);
-                }
-                else {
-                    // NCB is good,
-                    // Finish our NCB:
-                    std::swap(d.decisions[g+1],d.decisions[d.level]);
-                    a.set_true(d.decisions[g+1]);
-                    d.level = g+1;
-                    trace("level is now: ", d.level, " with decision ", d.decisions[d.level], "\n");
-                }
+                a.unassign(d.level_literal());
+                d.level--;
+                ASSERT(is_clause_unsatisfied(begin(NCB_clause), end(NCB_clause), a));
+                trace("swapping: ", d.decisions[d.level+1], " ", d.decisions[orig_level], "\n");
+                std::swap(d.decisions[d.level+1], d.decisions[orig_level]);
+                ASSERT(d.decisions[d.level+1] == -needed_flip);
+                d.level++;
+                a.set_true(d.level_literal());
+                ASSERT(is_clause_unsatisfied(begin(parent_clause), end(parent_clause), a));
             }
             // NCB ENDS HERE
             //////////////////////////////////////////////////////////////////
@@ -153,9 +171,6 @@ bool solve(cnf_table& c) {
             ASSERT(is_clause_unsatisfied(begin(parent_clause), end(parent_clause), a));
             ASSERT(parent_clause.contains(-d.decisions[d.level]));
             Parent[d.level] = parent_clause;
-            // The above lines basically transform the for(;;) loop into a
-            // "while there is a conflict clause..." loop.
-
 
             literal to_flip = d.decisions[d.level];
             trace("flipping literal: ", to_flip, "\n");
@@ -179,19 +194,20 @@ bool solve(cnf_table& c) {
                 new_parent.insert(begin(conflict_clause), end(conflict_clause));
                 trace("new parent: ", new_parent, "\n");
 
-                literal level_literal = d.decisions[d.level];
-                trace("level literal: ", d.decisions[d.level], "\n");
-                while (d.level >= 0 && (d.left_right[d.level] == R ||
-                                        !new_parent.contains(-level_literal))) {
+                while (d.level >= 0 && (d.level_direction() == R ||
+                                        !new_parent.contains(-d.level_literal()))) {
+                trace("level literal during backtrack: ", d.level_literal(), "\n");
 
                     // if the new parent contains -level_literal, then it must be
                     // able to be resolved with Parent[d.level].
-                    if (d.left_right[d.level] == R && new_parent.contains(-level_literal)) {
-                        trace("parent resolution possible against", Parent[d.level],  "\n");
-                        new_parent = resolve(Parent[d.level], new_parent, level_literal);
+                    if (d.level_direction() == R &&
+                        new_parent.contains(-d.level_literal())) {
+
+                        trace("parent resolution possible against ", Parent[d.level],  "\n");
+                        new_parent = resolve(Parent[d.level], new_parent, d.level_literal());
                         trace("new parent: ", new_parent, "\n");
                     }
-                    a.unassign(d.decisions[d.level]);
+                    a.unassign(d.level_literal());
                     // Uncommenting this leads to a 3x slowdown. Why?
                     //d.decisions[d.level] = std::abs(d.decisions[d.level]);
                     d.level--;
@@ -199,6 +215,7 @@ bool solve(cnf_table& c) {
                     /////////////////////////////////////////////////
                     // CONFLICT DIRECTED BACKJUMPING
                     if (new_parent.contains(-d.decisions[d.level])) {
+                        trace("entering conflict-directed backjumping\n");
                         int g = -1;
                         for (int i = d.level; i >= 0; --i) {
                             if (d.left_right[i] == L) {
@@ -240,15 +257,18 @@ bool solve(cnf_table& c) {
                         new_parent.contains(-d.decisions[d.level]) &&
                         c.clause_count < c.max_clause_count &&
                         c.size + new_parent.size() < c.max_size) {
+                        trace("recording new clause: ", new_parent, "\n");
                         c.insert_clause(new_parent);
                     }
                     //
                     /////////////////////////////////////////////////
-
-                    level_literal = d.decisions[d.level];
-                    trace("level literal: ", d.decisions[d.level], "\n");
                 }
-                if (d.level == -1) { return false; }
+
+                // Did we resolve into an empty clause?
+                if (d.level == -1) {
+                    ASSERT(d.level == -1);
+                    return false;
+                }
             }
         }
         d.level++;

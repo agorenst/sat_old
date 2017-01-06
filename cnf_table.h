@@ -154,7 +154,7 @@ bool is_clause_satisfied(const C& c, const A& a) {
 template <typename ClauseIter, typename Assignment>
 bool is_clause_unsatisfied(ClauseIter start, ClauseIter finish, const Assignment& a) {
     // NOTE: all of returns true for empty sequence.
-    // This is consistent with what we want, under self-reduction model.
+    // This is USUALLY NOT what we want, under self-reduction model.
     return std::all_of(start, finish, [&a](literal l) { return a.is_false(l); });
 }
 template <typename C, typename A>
