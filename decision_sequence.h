@@ -1,8 +1,9 @@
 // A mapping of decision level to the literals chosen at that level.
 
 #include <memory>
-
 #include <iostream>
+
+#include "small_set.h"
 
 class decision_sequence {
     public:
@@ -13,10 +14,12 @@ class decision_sequence {
     };
     std::unique_ptr<literal[]> decisions;
     std::unique_ptr<LRSTATUS[]> left_right;
+    std::unique_ptr<small_set<literal>[]> Parent;
     decision_sequence(literal max_literal):
         max_literal(max_literal),
         decisions(std::make_unique<literal[]>(max_literal)),
-        left_right(std::make_unique<LRSTATUS[]>(max_literal))
+        left_right(std::make_unique<LRSTATUS[]>(max_literal)),
+        Parent(std::make_unique<small_set<literal>[]>(max_literal))
     {
         // The default decisions.
         for (int i = 0; i < max_literal; ++i) {
