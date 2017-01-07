@@ -131,9 +131,15 @@ bool solve(cnf_table& c) {
         // Commit the decision to our assignment.
         d.left_right[d.level] = L;
         a.set_true(d.decisions[d.level]);
-        trace("literal set: ", d.decisions[d.level]);
+        trace("literal set: ", d.decisions[d.level], "\n");
 
         ASSERT(decision_and_assignment_consistent(d, a));
+        // If the CNF is satisfied by our current assignment,
+        // we're done.
+        if (is_cnf_satisfied(c, a)) {
+            trace("SAT: ", a, "\n");
+            return true;
+        }
 
         for (;;) {
             trace("conflict loop: start\n");
@@ -160,7 +166,11 @@ bool solve(cnf_table& c) {
             // of our earlier decisions higher up.
             //
             // From experience, this optimization is rife with off-by-one
-            // sorts of errors.
+            // sorts of errors. I think the D&N notation is just very strange.
+            //
+            // Basically: get to the lowest level that implies conflict\decision
+            // is still false. Then we'll consider the next decision level.
+            // We will increment that one until we find an L.
             trace("NCB: start\n");
             int orig_level = d.level;
             auto NCB_clause = parent_clause;
@@ -168,62 +178,56 @@ bool solve(cnf_table& c) {
             ASSERT(NCB_clause.contains(needed_flip));
             NCB_clause.erase(needed_flip);
 
+            // Reminder: the literal at the current level *is assigned*
+            ASSERT(a.is_true(d.level_literal()));
+            ASSERT(d.level_direction() == L);
+
             // Step one: undo our previous decisions so long as our parent
             // clause (assuming our needed_flip is false) is unsatisfied.
+            // Things get weird when our parent clause is unit! We undo
+            // everything?
             trace("NCB: undoing ");
-            do {
+            while (d.level >= 0 && clause_unsatisfied(NCB_clause, a)) {
                 trace(d.level_literal(), " ");
                 a.unassign(d.level_literal());
                 d.level--;
             }
-            while (NCB_clause.size() &&
-                   is_clause_unsatisfied(begin(NCB_clause), end(NCB_clause), a));
+            ASSERT(!NCB_clause.size() || !clause_unsatisfied(NCB_clause, a));
             trace("\n");
-            // Weird case: if parent_clause is unit (i.e., NCB_clause is empty), we
-            // still want to iterate at least once, but no more.
+            trace("NCB: d after initial undoes = ", d, "\n");
+
+            trace("NCB: redoing ", d.level_literal(), " to make clause unsat\n");
             d.level++;
             a.set_true(d.level_literal());
-
-            // Optional step: if the place we've stopped at is an R decision, then
-            // we know it's still implied by the earlier decisions, so we'd just
-            // have to make it again. So we might as well "make that decision now",
-            // and not pop our assignment stack so much.
-            if (d.level < orig_level) {
-                trace("NCB: redoing R decisions ");
-                do {
-                    d.level++;
-                    a.set_true(d.level_literal());
-                    trace(d.level_literal(), " ");
-                    trace("curdir:(", d.level_direction(), ") ");
-                    ASSERT(!NCB_clause.size() ||
-                            is_clause_unsatisfied(begin(NCB_clause), end(NCB_clause), a));
-                } while (d.level < orig_level &&
-                        d.level_direction() == R);
-                trace("\n");
+            ASSERT(clause_unsatisfied(NCB_clause, a));
+            
+            trace("NCB: redoing R decisions ");
+            while (d.level+1 < orig_level &&
+                   d.left_right[d.level+1] == R) {
+                d.level++;
+                a.set_true(d.level_literal());
+                trace("l=",d.level_literal(), "(", d.level_direction(), ") ");
             }
+            trace("\n");
 
-            // Second and final step: we have backtracked some amount (hopefully),
-            // we are  now ready to "pop" the decisions that were unecessary to
-            // our "R" decision.
-            trace("After backtracking: ", d, "\n");
-            // Make sure I understand what happens in the unit-clause case:
-            ASSERT(    NCB_clause.size()
-                   || (   is_clause_unsatisfied(begin(parent_clause), end(parent_clause), a)
-                       && orig_level == d.level));
+            ASSERT(clause_unsatisfied(NCB_clause, a));
+            ASSERT(d.level >= 0);
+
+            trace("NCB: new level = ", d.level, " orig level = ", orig_level, "\n");
+            trace("NCB: d = ", d, "\n");
 
             if (d.level < orig_level) {
-                ASSERT(d.level_direction() == L);
-                ASSERT(is_clause_unsatisfied(begin(NCB_clause), end(NCB_clause), a));
-                a.unassign(d.level_literal());
-                d.level--;
-                ASSERT(is_clause_unsatisfied(begin(NCB_clause), end(NCB_clause), a));
-                trace("swapping: ", d.decisions[d.level+1], " ", d.decisions[orig_level], "\n");
+                ASSERT(clause_unsatisfied(NCB_clause, a));
+
+                trace("NCB: swapping: ", d.decisions[d.level+1], " ", d.decisions[orig_level], "\n");
                 std::swap(d.decisions[d.level+1], d.decisions[orig_level]);
                 ASSERT(d.decisions[d.level+1] == -needed_flip);
                 d.level++;
                 a.set_true(d.level_literal());
-                ASSERT(is_clause_unsatisfied(begin(parent_clause), end(parent_clause), a));
+                trace("NCB: d = ", d, "\n");
+                ASSERT(clause_unsatisfied(NCB_clause, a));
             }
+            trace("NCB: done\n");
             // NCB ENDS HERE
             //////////////////////////////////////////////////////////////////
 
@@ -231,7 +235,7 @@ bool solve(cnf_table& c) {
             // to assign X, but found ourselves obliged to consider -X.
             // We do that here. Note that -X may very well not help, and that's when
             // we'll really backtrack.
-            ASSERT(is_clause_unsatisfied(begin(parent_clause), end(parent_clause), a));
+            //ASSERT(is_clause_unsatisfied(begin(parent_clause), end(parent_clause), a));
             ASSERT(parent_clause.contains(-d.decisions[d.level]));
             
             trace("conflict loop: d.Parent[", d.level, "] = ", parent_clause, "\n");

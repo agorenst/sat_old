@@ -184,6 +184,16 @@ auto has_conflict(const C& c, const A& a) {
     return has_conflict(begin(c), end(c), a);
 }
 
+// A new way of determining if a clause is unsatisfied, consistent
+// with the notion that an empty clause is unsatisfied.
+template<typename A>
+bool clause_unsatisfied(const small_set<literal>& c, const A& a) {
+    for (literal x : c) {
+        if (!a.is_false(x)) { return false; }
+    }
+    return true;
+}
+
 // Absolutely dead-stupid way of finding unit clauses...
 template <typename C, typename A>
 literal is_unit_clause_implying(const C& c, const A& a) {
