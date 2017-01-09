@@ -25,6 +25,26 @@ small_set<literal> find_conflict_augment(const cnf_table& c,
     return result;
 }
 
+small_set<literal> self_subsuming_resolution(small_set<literal> clause_1,
+                                            small_set<literal> clause_2,
+                                            literal pivot) {
+    auto result = resolve(clause_2, clause_1, pivot);
+    if (result.size() < clause_1.size()) {
+        std::sort(begin(result), end(result));
+        std::sort(begin(clause_1), end(clause_1));
+        if (std::includes(begin(clause_1), end(clause_1),
+                          begin(result), end(result))) {
+            //trace("SSR: ", clause_1, ", ", clause_2, ", ", result, "\n");
+            //std::cout << "SSR: " << std::endl 
+            //          << "\t" << clause_1 << std::endl
+            //          << "\t" << clause_2 << std::endl
+            //          << "\t" << result << std::endl;
+            return result;
+        }
+    }
+    return clause_1;
+}
+
 // TODO: figure out how to manage this better...
 const auto L = decision_sequence::LRSTATUS::LEFT;
 const auto R = decision_sequence::LRSTATUS::RIGHT;
@@ -373,7 +393,18 @@ bool solve(cnf_table& c) {
                         new_parent.contains(-d.decisions[d.level]) &&
                         c.clause_count < c.max_clause_count &&
                         c.size + new_parent.size() < c.max_size) {
-                        trace("recording new clause: ", new_parent, "\n");
+                        trace("CRR: ", new_parent, "\n");
+
+                        // CCR minimization:
+                        // From Sorensson and Biere, a nice and simple paper.
+                        // Gives a 5.9->5.7 second improvement on my computer on the ssa benchmarks.
+                        // Presumably also helps memory usage (once better implementations are made...)
+                        for (int i = d.level; i >= 0; --i) {
+                            if (d.left_right[i] == R &&
+                                new_parent.contains(-d.decisions[i])) {
+                                new_parent = self_subsuming_resolution(new_parent, d.Parent[i], d.decisions[i]);
+                            }
+                        }
                         c.insert_clause(new_parent);
                     }
                     //
@@ -386,21 +417,6 @@ bool solve(cnf_table& c) {
                     ASSERT(new_parent.size() == 0);
                     ASSERT(d.level == -1);
                     return false;
-                }
-                else {
-                    // Uncertainty: it seems like this is an appropriate addition,
-                    // but it's not included in D&N. Experimentation revealed that
-                    // this made some benchmarks faster, and some benchmarks slower.
-                    // I assume that we're circumventing the NCB that would otherwise
-                    // occur when we go around the loop again.
-                    //ASSERT(d.level_direction() == L);
-                    //ASSERT(is_clause_unsatisfied(begin(new_parent), end(new_parent), a));
-                    //a.unassign(d.level_literal());
-                    //d.decisions[d.level] = -d.decisions[d.level];
-                    //d.left_right[d.level] = R;
-                    //d.Parent[d.level] = new_parent;
-                    //a.set_true(d.level_literal());
-                    //ASSERT(!is_clause_unsatisfied(begin(new_parent), end(new_parent), a));
                 }
             } // End case where conflict clause was found
         } // End conflict loop
