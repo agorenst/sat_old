@@ -275,13 +275,20 @@ bool solve(cnf_table& c) {
                 //      go-around of the conflcit loop will find that conflict,
                 //      and bring the full force of NCB and so on behind hit. That's
                 //      conjecture on my part...
+                //   4) And if the parent does not contain our level's literal,
+                //      then obviously undoing that (even if it's L) won't address the
+                //      resolution conflict we're trying to reverse, so again we
+                //      continue backtracking.
+
+
+                // Loop invariant:
+                ASSERT(is_clause_unsatisfied(begin(new_parent), end(new_parent), a));
                 while (d.level >= 0 && (d.level_direction() == R ||
                                         !new_parent.contains(-d.level_literal()))) {
                     trace("backtrack loop: d.level         = ", d.level, "\n"
                           "              , d.level_literal = ", d.level_literal(), "\n"
                           "              , new_parent      = ", new_parent, "\n");
 
-                    ASSERT(is_clause_unsatisfied(begin(new_parent), end(new_parent), a));
                     // If this level was forced (i.e., direction = R), then there's a
                     // parent clause we can potentially resolve against new_parent.
                     // If possible, do this resolution to get a "smarter" new_parent.
@@ -308,7 +315,11 @@ bool solve(cnf_table& c) {
                     /////////////////////////////////////////////////
                     // CONFLICT DIRECTED BACKJUMPING
                     //
-                    // Very similar to NCB in spirit. We've found 
+                    // Very similar to NCB in spirit. Briefly, if we find an R-variable
+                    // that comes after an L variable, and by our resolution reasoning
+                    // we can "swap them out" without invalidating any of the reasoning,
+                    // do it. This moves the R variable "up" the tree, I suppose.
+                    // 
                     if (new_parent.contains(-d.decisions[d.level])) {
                         trace("CDB: starting\n");
                         int g = -1;
@@ -318,13 +329,14 @@ bool solve(cnf_table& c) {
                                 break;
                             }
                         }
-                        //ASSERT(g != -1);
-                        ASSERT(g <= d.level);
                         // g is the highest left-decision level.
                         trace("CDB candidate: ", g, " origlevel: ", d.level, "\n");
 
-                        // Only continue if it reduces d.level.
-                        if (g >= 0 && g < d.level) {
+                        // Only continue if there is an L-decision level.
+                        // (See Nadel's thesis for a statement that an L-decision is a
+                        // necessary condition, but I don't know why vs., say, the "-1"-th
+                        // level. I guess that mean's we're UNSAT anyways...)
+                        if (g >= 0) {
                             bool clause_still_unsat =
                                 std::all_of(begin(new_parent), end(new_parent), [&](literal l) {
                                     if (l == -d.decisions[d.level]) { return true; }
@@ -335,16 +347,19 @@ bool solve(cnf_table& c) {
                                 });
 
                             if (clause_still_unsat) {
+                                // Save d.level by bringing it below g. So we don't have
+                                // to reassign it or anything like that.
                                 std::swap(d.decisions[g], d.decisions[d.level]);
                                 for (int i = d.level; i > g; --i) {
                                     a.unassign(d.decisions[i]);
                                 }
+                                ASSERT(clause_unsatisfied(new_parent, a));
                                 d.Parent[g] = new_parent;
+                                d.left_right[g] = L;
                                 trace("CDB set d.level: ", d.level, " = ", g, "\n");
                                 d.level = g;
                             } else { trace("CDB: clause did not remain unsat\n"); }
-
-                        } else { trace("CDB: not possible/worth it\n"); }
+                        } else { trace("CDB: bailing for lack of L literals\n"); }
                     }
                     //
                     /////////////////////////////////////////////////
