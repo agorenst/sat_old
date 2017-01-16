@@ -74,6 +74,34 @@ public:
     int remaining_size() const { return max_size - size; }
     int remaining_clauses() const { return max_clause_count - clause_count; }
 
+    template<typename Assignment>
+    bool confirm_is_implied_unit(const Assignment& a, literal l) {
+        for (auto cit = clause_begin(); cit != clause_end(); ++cit) {
+            auto implied = is_unit_clause_implying(cit, a);
+            if (implied && implied == l) {
+                trace("found implication reason: ", cit, "\n");
+                return true;
+            }
+            if (implied) {
+                trace("found implied: ", implied, " from clause ", cit, "\n");
+            }
+        }
+        return false;
+    }
+
+    // Want to make sure that the CNF always has some reasonable guarantees...
+    bool sanity_check() {
+        for (auto cit = clause_begin(); cit != clause_end(); ++cit) {
+            small_set<literal> explicit_set;
+            explicit_set.insert(cit->start, cit->finish);
+            if (explicit_set.size() != std::distance(cit->start, cit->finish)) {
+                trace("ASSERT: found a bad clause: ", cit, " != ", explicit_set, "\n");
+                return false;
+            }
+        }
+        return true;
+    }
+
 };
 
 // Iterating over a CNF means iterating over its clauses.
@@ -210,6 +238,7 @@ literal is_unit_clause_implying(const C& c, const A& a) {
     if (nextl == end(c)) { return *l_ptr; }
     return 0;
 }
+
 
 template <typename A>
 literal find_unit_in_cnf(const cnf_table& c, const A& a) {

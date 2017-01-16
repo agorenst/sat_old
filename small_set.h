@@ -3,6 +3,7 @@
 
 #include <vector>
 #include <algorithm>
+#include <iostream>
 
 template <typename T>
 class small_set {
@@ -29,6 +30,10 @@ class small_set {
     bool contains(const T& t) const {
         return std::find(std::begin(data), std::end(data), t) != std::end(data);
     }
+    template<typename F>
+    bool contains(F f) const {
+        return std::find_if(std::begin(data), std::end(data), f) != std::end(data);
+    }
     typename std::vector<T>::iterator begin() { return data.begin(); }
     typename std::vector<T>::iterator end() { return data.end(); }
     typename std::vector<T>::const_iterator begin() const { return data.begin(); }
@@ -42,6 +47,8 @@ class small_set {
     int size() const {
         return data.size();
     }
+
+    T operator[](int i) const { return data[i]; }
 };
 
 template <typename T>

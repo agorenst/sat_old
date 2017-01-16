@@ -56,7 +56,7 @@ void assignment::print(std::ostream& o) const {
     for (literal i = is_assigned_true.first_index();
          i != is_assigned_true.end_index();
          ++i) {
-        if (is_assigned_true.get_copy(i)) {
+        if (i && is_assigned_true.get_copy(i)) {
             o << i << " ";
         }
     }

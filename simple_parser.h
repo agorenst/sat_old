@@ -1,3 +1,4 @@
+#include "small_set.h" 
 #include <vector>
 
-std::vector<std::vector<int>> cnf_from_stdin();
+std::vector<small_set<int>> cnf_from_stdin();

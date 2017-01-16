@@ -40,6 +40,8 @@ public:
         // iteration pattern, because of potential cache misses. Do we
         // group (x, -x) closely, or (x, x+1) closely?
         int index = literal_to_index(i);
+        if (index < 0 || index >= size) { trace("BAD INDEX: ", index, " ", i, "\n"); }
+        ASSERT(index >= 0 && index < size);
         return data[index];
     }
 
