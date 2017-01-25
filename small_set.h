@@ -51,6 +51,16 @@ class small_set {
     T operator[](int i) const { return data[i]; }
 };
 
+template<typename T>
+auto begin(small_set<T>& s) { return s.begin(); }
+template<typename T>
+auto end(small_set<T>& s) { return s.end(); }
+template<typename T>
+auto begin(const small_set<T>& s) { return s.begin(); }
+template<typename T>
+auto end(const small_set<T>& s) { return s.end(); }
+
+
 template <typename T>
 void swap_elt(small_set<T>& from, small_set<T>& to, const T t) {
     from.erase(t);

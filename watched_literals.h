@@ -1,6 +1,7 @@
 #include <iterator>
 #include "cnf_table.h"
 #include "debug.h"
+#include "clause_map.h"
 
 class watched_literal_db {
     private:
@@ -11,6 +12,34 @@ class watched_literal_db {
     literal_map<small_set<cnf_table::clause_iterator>> watch_lists;
     small_set<std::pair<literal,cnf_table::clause_iterator>> units;
     int clause_count;
+
+    void on_resize(cnf_table::clause_iterator old_base,
+                     cnf_table::clause_iterator new_base,
+                     int new_size) {
+        // the watches_by_clause is already remapped...
+        trace("Starting to remap watched_literal_db\n");
+        for (auto it = watch_lists.first_index();
+                  it != watch_lists.end_index();
+                  ++it) {
+            if (it == 0) { continue; };
+            small_set<cnf_table::clause_iterator> new_watchers;
+            auto old_set = watch_lists[it];
+            for (auto w : old_set) {
+                int old_index = w - old_base;
+                int new_index = old_index;
+                cnf_table::clause_iterator new_clause = new_base + new_index;
+                new_watchers.insert(new_clause);
+            }
+            trace("new watch_list: ", new_watchers, "\n");
+            watch_lists[it] = new_watchers;
+        }
+
+        for (auto it = units.begin(); it != units.end(); ++it) {
+            int old_index = std::get<1>(*it) - old_base;
+            int new_index = old_index;
+            *it = {std::get<0>(*it), new_base + new_index};
+        }
+    }
 
     public:
 
@@ -31,14 +60,20 @@ class watched_literal_db {
     };
 
     watched_literal_db(cnf_table& cnf):
-        watches_by_clause(cnf.max_clause_count, cnf.clauses.get()),
+        watches_by_clause(cnf, cnf.clauses_max, cnf.clauses.get()),
         watch_lists(cnf.max_literal_count*2)
     {
         for (cnf_table::clause_iterator it = cnf.clauses.get();
-                it != cnf.clauses.get() + cnf.clause_count;
+                it != cnf.clauses.get() + cnf.clauses_count;
                 ++it) {
             add_clause(it);
         }
+
+        using namespace std::placeholders;
+        // Register ourselves as needing a remap:
+        std::function<void(cnf_table::clause_iterator, cnf_table::clause_iterator, int)> m =
+            std::bind(&watched_literal_db::on_resize, this, _1, _2, _3);
+        cnf.resizers.push_back(m);
     }
 
     //std::pair<literal,cnf_table::clause_iterator> get_unit() {
@@ -49,16 +84,11 @@ class watched_literal_db {
         }
         return 0;
     }
-    //cnf_table::clause_iterator
-    small_set<literal> get_cause() {
+    cnf_table::clause_iterator get_cause() {
         ASSERT(units.size());
         auto u = *(units.begin());
         units.erase(u);
-        small_set<literal> cause_clause;
-        cause_clause.insert(std::get<1>(u)->start,
-                            std::get<1>(u)->finish);
-
-        return cause_clause;
+        return std::get<1>(u);
     }
 
     void clear_units() {

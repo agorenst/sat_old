@@ -3,7 +3,6 @@
 #include "simple_parser.h"
 #include "decision_sequence.h"
 #include "assignment.h"
-#include "clause_based_heuristic.h"
 #include "watched_literals.h"
 
 #include <algorithm>
@@ -11,26 +10,20 @@
 
 using namespace std;
 
-template <typename Assignment>
-small_set<literal> find_conflict_augment(const cnf_table& c,
-                                         const small_set<literal>& new_parent,
-                                         const Assignment& a) {
-    small_set<literal> result;
-
+cnf_table::clause_iterator find_conflict_augment(const cnf_table& c,
+                                                 const assignment& a) {
     auto conflict_clause = has_conflict(c, a);
-    if (conflict_clause != end(c)) {
-        result.insert(begin(conflict_clause), end(conflict_clause));
-    }
-    else if (new_parent.size() && is_clause_unsatisfied(begin(new_parent), end(new_parent), a)) {
-        result.insert(begin(new_parent), end(new_parent));
-    }
-    return result;
+    if (conflict_clause == end(c)) { return nullptr; }
+    return conflict_clause;
 }
 
 small_set<literal> self_subsuming_resolution(small_set<literal> clause_1,
-                                            small_set<literal> clause_2,
+                                            cnf_table::clause_iterator clause_2,
                                             literal pivot) {
-    auto result = resolve(clause_2, clause_1, pivot);
+    auto result = resolve(begin(clause_2),
+                         end(clause_2),
+                         begin(clause_1),
+                         end(clause_1), pivot);
     if (result.size() < clause_1.size()) {
         std::sort(begin(result), end(result));
         std::sort(begin(clause_1), end(clause_1));
@@ -84,15 +77,14 @@ bool decision_and_assignment_consistent(const decision_sequence& d,
 // This is the main SSS implementation.
 bool solve(cnf_table& c) {
     ASSERT(c.sanity_check());
-    trace("main solver: start");
+    trace("SSS: start\n");
 
     // We initialize our data structures:
     // d contains the information about the <order> of
     //    our decisions and how the assignment evolves.
     // a contains exactly the assigned literals, nothing
     //    more.
-    decision_sequence d(c.max_literal_count);
-    //cbh_db heuristic(c);
+    decision_sequence d(c, c.max_literal_count);
     assignment a(c.max_literal_count);
     watched_literal_db wl(c);
     ASSERT(d.level == 0);
@@ -102,74 +94,103 @@ bool solve(cnf_table& c) {
 
     // All setup complete. This loop is the rest of the function.
     for (;;) {
-        trace("main loop: start\n");
+        trace("SSS: main loop top\n");
         trace("a: ", a, "\n");
         trace("d: ", d, "\n");
 
-        ASSERT(d.sanity_check(a));
         ASSERT(c.sanity_check());
-        ASSERT(a.is_unassigned(d.decisions[d.level]));
+        ASSERT(d.decisions[d.level] == 0);
+        ASSERT(d.Parent[d.level] == nullptr);
+        ASSERT(d.left_right[d.level] == L);
+        ASSERT(d.sanity_check(a));
 
         new_parent.clear();
 
         // We choose a new literal to act on.
         // If there's a unit literal, we choose that,
         // otherwise we make a decision according to some
-        // heuristic. Currently our decision_sequence _d_
-        // encodes information about our next decision --
-        // it's quite arbitrary.
+        // heuristic.
 
+        literal decision_lit = 0;
         //////////////////////////////////////////////////////////////////
         // PROPOGATING SIMPLE UNITS STARTS HERE
         if (wl.has_units()) {
-            ASSERT(has_conflict(begin(c), end(c), a) == end(c));
+            ASSERT(has_conflict(c, a) == end(c));
             while (literal unit = wl.get_unit()) {
-                if (!a.is_unassigned(unit)) { break; }
-                trace("Confirm unit is unit: ", unit, "\n");
+                trace("BCP: unit found = ", unit, "\n");
+                if (!a.is_unassigned(unit)) {
+                    trace("BCP: break, conflict\n");
+                    break;
+                }
+
                 ASSERT(c.confirm_is_implied_unit(a, unit));
-
-                auto to_swap = std::find_if(d.decisions.get(), d.decisions.get()+d.max_literal, [unit](literal l) { return std::abs(l) == std::abs(unit); });
-                ASSERT(to_swap >= d.decisions.get()+d.level);
-                ASSERT(to_swap < d.decisions.get()+d.max_literal);
-
-                std::swap(d.decisions[d.level], *to_swap);
-                ASSERT(std::abs(d.decisions[d.level]) == std::abs(unit));
 
                 d.decisions[d.level] = unit;
                 d.left_right[d.level] = R;
-                d.Parent[d.level] = wl.get_cause(); // this pops the unit
+                d.Parent[d.level] = wl.get_cause(); // this pops the unit. TODO: fix
                 d.level++;
                 a.set_true(unit);
                 wl.apply_literal(a, unit);
             }
+
+            // We're either out of units, or we had a conflict. We need
+            // to backtrack to the last non-conflict so we can set up
+            // our real conflict-handling logic to manage this.
             wl.clear_units();
+
             // while there's a conflict, we want to pop assignments...
-            auto cc = has_conflict(begin(c), end(c), a);
+            auto cc = has_conflict(c, a);
             if (cc != end(c)) {
                 while (cc != end(c)) {
-                    while (is_clause_unsatisfied(begin(cc), end(cc), a)) {
+                    while (clause_unsat(cc, a)) {
                         d.level--;
                         a.unassign(d.decisions[d.level]);
-                        d.Parent[d.level].clear();
+                        decision_lit = d.decisions[d.level];
+                        d.decisions[d.level] = 0;
+                        d.Parent[d.level] = nullptr;
                     }
-                    cc = has_conflict(begin(c), end(c), a);
+                    cc = has_conflict(c, a);
                 }
 
-                a.set_true(d.decisions[d.level]);
-                ASSERT(has_conflict(begin(c), end(c), a) != end(c));
-                a.unassign(d.decisions[d.level]);
-                ASSERT(has_conflict(begin(c), end(c), a) == end(c));
+                // If we had a conflict, then the decision literal is
+                // chosen to pass that conflict on to our "real"
+                // conflict handling logic.
+                a.set_true(decision_lit);
+                ASSERT(has_conflict(c, a) != end(c));
+                a.unassign(decision_lit);
+                ASSERT(has_conflict(c, a) == end(c));
             }
         }
         //
         //////////////////////////////////////////////////////////////////
+
         ASSERT(!wl.has_units());
-        ASSERT(has_conflict(begin(c), end(c), a) == end(c));
+        ASSERT(has_conflict(c, a) == end(c));
 
         if (is_cnf_satisfied(c, a)) {
             trace("SAT: ", a, "\n");
             return true;
         }
+
+        // MAKE A DECISION
+        if (!decision_lit) { // if our unit-prop has'nt made our decision for us.
+            for (cnf_table::clause_iterator cit = begin(c); cit != end(c); ++cit) {
+                for (auto x : cit) {
+                    if (a.is_unassigned(x)) {
+                        decision_lit = x;
+                        break;
+                    }
+                }
+                if (decision_lit) { break; }
+            }
+            trace("SSS decided on literal: ", decision_lit, "\n");
+        }
+        d.decisions[d.level] = decision_lit;
+        // DONE MAKING A DECISION
+
+        ASSERT(d.decisions[d.level] != 0);
+        ASSERT(a.is_unassigned(d.decisions[d.level]));
+        ASSERT(!decision_lit || d.decisions[d.level] == decision_lit);
 
         // Commit the decision to our assignment.
         d.left_right[d.level] = L;
@@ -185,26 +206,25 @@ bool solve(cnf_table& c) {
             return true;
         }
 
-        for (;;) {
+        // In D&N we look for conflict at both the CNF and the new_parent
+        // clause. Original design meant that new_parent was a value, and not
+        // necessarily in the CNF. However, after CRR the new_parent is always
+        // in the CNF. This allows us to get rid of all value types, and
+        // unify our reasoning to only think about clause_iterators.
+        // I don't have 100% understanding, but it is *necessary* that the
+        // new_parent clause be added to the CNF. If the CNF ever stops changing
+        // (e.g., if our out-of-memory-mode is to just stop learning clauses)
+        // then we will get stuck in what looks like an infinite loop.
+        while (const auto parent_clause = find_conflict_augment(c, a)) {
             trace("conflict loop: start\n");
+            trace("conflict clause: ", parent_clause, "\n");
             trace("a: ", a, "\n");
             trace("d: ", d, "\n");
 
-
-
-            // We try to find a conflict clause (one set to all-false by a).
-            // It will either exist in the CNF c, or it could be "new_parent"
-            const auto parent_clause = find_conflict_augment(c, new_parent, a);
-            if (!parent_clause.size()) {
-                trace("conflict loop: end, no conflict\n");
-                break;
-            }
-            trace("conflict clause: ", parent_clause, "\n");
             // Here's where we really have to clear the units...
             wl.clear_units();
 
-
-            ASSERT(parent_clause.contains(-d.level_literal()));
+            ASSERT(clause_contains(parent_clause, -d.level_literal()));
 
             //////////////////////////////////////////////////////////////////
             // NCB STARTS HERE
@@ -224,7 +244,8 @@ bool solve(cnf_table& c) {
             // We will increment that one until we find an L.
             trace("NCB: start\n");
             int orig_level = d.level;
-            auto NCB_clause = parent_clause;
+            small_set<literal> NCB_clause;
+            NCB_clause.insert(begin(parent_clause), end(parent_clause));
             literal needed_flip = -d.level_literal();
             ASSERT(NCB_clause.contains(needed_flip));
             NCB_clause.erase(needed_flip);
@@ -238,12 +259,13 @@ bool solve(cnf_table& c) {
             // Things get weird when our parent clause is unit! We undo
             // everything?
             trace("NCB: undoing ");
-            while (d.level >= 0 && clause_unsatisfied(NCB_clause, a)) {
+            while (d.level >= 0 && clause_unsat(NCB_clause, a)) {
                 trace(d.level_literal(), " ");
                 a.unassign(d.level_literal());
                 d.level--;
+                // deliberately >saving< our old decisions.
             }
-            ASSERT(!NCB_clause.size() || !clause_unsatisfied(NCB_clause, a));
+            ASSERT(!NCB_clause.size() || !clause_unsat(NCB_clause, a));
             trace("\n");
             trace("NCB: d after initial undoes = ", d, "\n");
 
@@ -251,34 +273,43 @@ bool solve(cnf_table& c) {
             d.level++;
             trace("NCB: redoing ", d.level_literal(), " to make clause unsat\n");
             a.set_true(d.level_literal());
-            ASSERT(clause_unsatisfied(NCB_clause, a));
+            ASSERT(clause_unsat(NCB_clause, a));
             
             trace("NCB: redoing R decisions ");
             while (d.level+1 < orig_level &&
                    d.left_right[d.level+1] == R) {
                 d.level++;
+                ASSERT(d.level_literal());
                 a.set_true(d.level_literal());
                 trace("l=",d.level_literal(), "(", d.level_direction(), ") ");
             }
             trace("\n");
 
-            ASSERT(clause_unsatisfied(NCB_clause, a));
+            ASSERT(clause_unsat(NCB_clause, a));
             ASSERT(d.level >= 0);
 
             trace("NCB: new level = ", d.level, " orig level = ", orig_level, "\n");
             trace("NCB: d = ", d, "\n");
 
             if (d.level < orig_level) {
-                ASSERT(clause_unsatisfied(NCB_clause, a));
+                ASSERT(clause_unsat(NCB_clause, a));
                 // Here's where we really have to clear the units...
 
                 trace("NCB: swapping: ", d.decisions[d.level+1], " ", d.decisions[orig_level], "\n");
                 std::swap(d.decisions[d.level+1], d.decisions[orig_level]);
                 ASSERT(d.decisions[d.level+1] == -needed_flip);
                 d.level++;
+                ASSERT(d.level_literal());
                 a.set_true(d.level_literal());
                 trace("NCB: d = ", d, "\n");
-                ASSERT(clause_unsatisfied(NCB_clause, a));
+                ASSERT(clause_unsat(NCB_clause, a));
+
+                // Maybe useless? maintain invariant...
+                for (int i = d.level+1; i < d.max_literal; ++i) {
+                    d.decisions[i] = 0;
+                    d.Parent[i] = nullptr;
+                    d.left_right[i] = L;
+                }
             }
             trace("NCB: done\n");
             // NCB ENDS HERE
@@ -288,8 +319,8 @@ bool solve(cnf_table& c) {
             // to assign X, but found ourselves obliged to consider -X.
             // We do that here. Note that -X may very well not help, and that's when
             // we'll really backtrack.
-            ASSERT(is_clause_unsatisfied(begin(parent_clause), end(parent_clause), a));
-            ASSERT(parent_clause.contains(-d.decisions[d.level]));
+            ASSERT(clause_unsat(parent_clause, a));
+            ASSERT(clause_contains(parent_clause, -d.decisions[d.level]));
             trace("conflict loop: d.Parent[", -d.decisions[d.level], "(", d.level, ")] = ", parent_clause, "\n");
             d.Parent[d.level] = parent_clause;
 
@@ -301,12 +332,12 @@ bool solve(cnf_table& c) {
             d.decisions[d.level] = to_flip;
             a.set_true(to_flip);
             d.left_right[d.level] = R;
-            ASSERT(d.Parent[d.level].contains(d.decisions[d.level]));
+            ASSERT(clause_contains(d.Parent[d.level], d.decisions[d.level]));
 
             wl.apply_literal(a, d.decisions[d.level]);
 
             // Here's the moment of truth: are we really going to backtrack?
-            auto conflict_clause = has_conflict(begin(c), end(c), a);
+            auto conflict_clause = has_conflict(c, a);
             if (conflict_clause != end(c)) {
                 trace("conflict loop: after flipping conflict remains: ", c, "\n");
 
@@ -338,7 +369,7 @@ bool solve(cnf_table& c) {
 
 
                 // Loop invariant:
-                ASSERT(is_clause_unsatisfied(begin(new_parent), end(new_parent), a));
+                ASSERT(clause_unsat(new_parent, a));
                 while (d.level >= 0 && (d.level_direction() == R ||
                                         !new_parent.contains(-d.level_literal()))) {
                     trace("backtrack loop: d.level         = ", d.level, "\n"
@@ -352,12 +383,18 @@ bool solve(cnf_table& c) {
                         new_parent.contains(-d.level_literal())) {
 
                         trace("backtrack loop: resolving against ", d.Parent[d.level],  "\n");
-                        new_parent = resolve(d.Parent[d.level], new_parent, d.level_literal());
+                        new_parent = resolve(begin(d.Parent[d.level]),
+                                             end(d.Parent[d.level]),
+                                             begin(new_parent),
+                                             end(new_parent), d.level_literal());
                         trace("backtrack loop: new parent = ", new_parent, "\n");
                     }
 
                     trace("backtrack loop: unassigning: ", d.level_literal(), "\n");
                     a.unassign(d.level_literal());
+                    d.decisions[d.level] = 0;
+                    d.Parent[d.level] = nullptr;
+                    d.left_right[d.level] = L;
                     d.level--;
                     
                     // The big question: why do we do CDB and CCR *after* backtracking?
@@ -408,9 +445,16 @@ bool solve(cnf_table& c) {
                                 std::swap(d.decisions[g], d.decisions[d.level]);
                                 for (int i = d.level; i > g; --i) {
                                     a.unassign(d.decisions[i]);
+                                    d.decisions[i] = 0;
+                                    d.Parent[i] = nullptr;
+                                    d.left_right[i] = L;
                                 }
-                                ASSERT(clause_unsatisfied(new_parent, a));
-                                d.Parent[g] = new_parent;
+                                ASSERT(clause_unsat(new_parent, a));
+                                // This no longer works so well (as new_parent isn't
+                                // yet in the clause database), and also weird.
+                                // D&N says that this is part of CDB, but it only
+                                // makes sense that R decisions have parents...
+                                //d.Parent[g] = new_parent;
                                 d.left_right[g] = L;
                                 trace("CDB set d.level: ", d.level, " = ", g, "\n");
                                 d.level = g;
@@ -426,9 +470,13 @@ bool solve(cnf_table& c) {
                     // Basically, we've found that new_parent is a certificate
                     // why we made a bad choice (hence, d.level should be L).
                     if (d.level >= 0 && d.left_right[d.level] == L &&
-                        new_parent.contains(-d.decisions[d.level]) &&
-                        c.clause_count < c.max_clause_count &&
-                        c.size + new_parent.size() < c.max_size) {
+                            new_parent.contains(-d.decisions[d.level])) {
+                        if (c.clauses_count >= c.clauses_max ||
+                            c.raw_data_count + new_parent.size() >= c.raw_data_max) {
+                            c.consider_resizing();
+                        }
+                        ASSERT(c.clauses_count < c.clauses_max &&
+                               c.raw_data_count + new_parent.size() < c.raw_data_max);
                         trace("CRR: ", new_parent, "\n");
 
                         // CCR minimization:
@@ -437,7 +485,7 @@ bool solve(cnf_table& c) {
                         // Presumably also helps memory usage (once better implementations are made...)
                         for (int i = d.level; i >= 0; --i) {
                             if (d.left_right[i] == R &&
-                                new_parent.contains(-d.decisions[i])) {
+                                    new_parent.contains(-d.decisions[i])) {
                                 new_parent = self_subsuming_resolution(new_parent, d.Parent[i], d.decisions[i]);
                             }
                         }
@@ -447,7 +495,7 @@ bool solve(cnf_table& c) {
                     }
                     //
                     /////////////////////////////////////////////////
-                    ASSERT(!new_parent.size() || is_clause_unsatisfied(begin(new_parent), end(new_parent), a));
+                    ASSERT(!new_parent.size() || clause_unsat(new_parent, a));
                 }
 
                 // Did we resolve into an empty clause?

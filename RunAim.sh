@@ -6,6 +6,7 @@
 #for f in inputs/aim*-100*
 #for f in inputs/aim*
 for f in inputs/uf75-*
+#for f in inputs/uf125-*
 #for f in inputs/fla*35*
 do
     echo $f

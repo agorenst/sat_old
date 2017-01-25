@@ -11,17 +11,37 @@
 template<typename T>
 class clause_map {
 private:
-    const int size;
+    int size;
     typedef cnf_table::clause_iterator key_t;
     key_t offset;
     std::unique_ptr<T[]> data;
 
+    void on_resize(cnf_table::clause_iterator old_base,
+                   cnf_table::clause_iterator new_base,
+                   int new_size) {
+        auto new_data = std::make_unique<T[]>(new_size);
+
+        for (int i = 0; i < size; ++i) {
+            new_data[i] = data[i];
+        }
+
+        size = new_size;
+        offset = new_base;
+        std::swap(data, new_data);
+    }
+
 public:
-    clause_map(const int size, const key_t offset):
+    clause_map(cnf_table& c, const int size, const key_t offset):
         size(size),
         offset(offset),
         data(std::make_unique<T[]>(size))
-    {}
+    {
+        using namespace std::placeholders;
+        // Register ourselves as needing a remap:
+        std::function<void(key_t, key_t, int)> on_resizer =
+            std::bind(&clause_map::on_resize, this, _1, _2, _3);
+        c.resizers.push_back(on_resizer);
+    }
 
     T& operator[](const key_t k) {
         return data[k-offset];

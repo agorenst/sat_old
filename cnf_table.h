@@ -25,13 +25,13 @@
 
 class cnf_table {
 public:
-    const int max_size;
-    const int max_clause_count;
-    const int max_literal_count;
-    int size = 0;
-    int clause_count = 0;
+    int clauses_max;
+    int max_literal_count;
+    int raw_data_max;
+    int raw_data_count = 0;
+    int clauses_count = 0;
 
-    std::unique_ptr<literal[]> core_map;
+    std::unique_ptr<literal[]> raw_data;
 
     typedef literal* raw_iterator;
     struct clause {
@@ -42,37 +42,40 @@ public:
     std::unique_ptr<clause[]> clauses;
 
     cnf_table(size_t _max_size, size_t _max_clause_count, size_t max_literal_count):
-        max_size(_max_size*10),
-        max_clause_count(_max_clause_count*4),
+        raw_data_max(_max_size),
+        clauses_max(_max_clause_count),
         max_literal_count(max_literal_count),
-        core_map(std::make_unique<literal[]>(max_size)),
-        clauses(std::make_unique<clause[]>(max_clause_count))
+        raw_data(std::make_unique<literal[]>(raw_data_max)),
+        clauses(std::make_unique<clause[]>(clauses_max))
     {}
+
+    // If a datatype wants to register for when we remap our clause array...
+    std::vector<std::function<void(clause_iterator, clause_iterator, int)>> resizers;
 
     // Used for initializing the cnf_table.
     template <typename ClauseType>
     clause_iterator insert_clause(const ClauseType& c) {
 
-        raw_iterator clause_start = core_map.get() + size;
+        raw_iterator clause_start = raw_data.get() + raw_data_count;
         for (auto x : c) {
-            core_map[size++] = x;
+            raw_data[raw_data_count++] = x;
         }
-        raw_iterator clause_end = core_map.get() + size;
+        raw_iterator clause_end = raw_data.get() + raw_data_count;
 
-        ASSERT(clause_end <= core_map.get()+max_size);
+        ASSERT(clause_end <= raw_data.get()+raw_data_max);
 
-        clauses[clause_count++] = {clause_start, clause_end};
+        clauses[clauses_count++] = {clause_start, clause_end};
 
-        return clauses.get()+(clause_count-1);
+        return clauses.get()+(clauses_count-1);
     }
 
     clause_iterator clause_begin() const { return clauses.get(); }
-    clause_iterator clause_end() const { return clauses.get() + clause_count; }
+    clause_iterator clause_end() const { return clauses.get() + clauses_count; }
 
     // If we're learning a clause, we may want to see if it would actually
     // fit in our database...
-    int remaining_size() const { return max_size - size; }
-    int remaining_clauses() const { return max_clause_count - clause_count; }
+    int remaining_size() const { return raw_data_max - raw_data_count; }
+    int remaining_clauses() const { return clauses_max - clauses_count; }
 
     template<typename Assignment>
     bool confirm_is_implied_unit(const Assignment& a, literal l) {
@@ -102,6 +105,56 @@ public:
         return true;
     }
 
+    // This one is trickier, because clauses point into us.
+    void resize_raw_data() {
+        auto base = raw_data.get();
+        int new_size = raw_data_max * 2;
+        std::unique_ptr<literal[]> new_data = std::make_unique<literal[]>(new_size);
+        for (int i = 0; i < raw_data_count; ++i) {
+            new_data[i] = raw_data[i];
+        }
+
+        // We update the clauses.
+        auto new_base = new_data.get();
+        for (int i = 0; i < clauses_count; ++i) {
+            auto new_start = (clauses[i].start - base) + new_base;
+            auto new_finish = (clauses[i].finish - base) + new_base;
+            clauses[i] = {new_start, new_finish};
+        }
+
+        raw_data_max = new_size;
+        std::swap(new_data, raw_data);
+    };
+
+    // This invalidates any ckeys that may exist "in the wild".
+    void resize_clauses() {
+        int new_size = clauses_max * 2;
+        std::unique_ptr<clause[]> new_data = std::make_unique<clause[]>(new_size);
+
+        // copy the data over...
+        for (int i = 0; i < clauses_count; ++i) {
+            new_data[i] = clauses[i];
+        }
+
+        // Call all the remappers. Here we're just "rebasing" all the
+        // old pointers.
+        for (auto m : resizers) {
+            m(clauses.get(), new_data.get(), new_size);
+        }
+
+        clauses_max = new_size;
+        // And swap, in part to free the old memory.
+        std::swap(new_data, clauses);
+    };
+
+    void consider_resizing() {
+        if (clauses_count * 2 > clauses_max) {
+            resize_clauses();
+        }
+        if (raw_data_count * 2 > raw_data_max) {
+            resize_raw_data();
+        }
+    }
 };
 
 // Iterating over a CNF means iterating over its clauses.
@@ -165,68 +218,48 @@ small_set<literal> resolve(const ClauseA& ca, const ClauseB& cb, literal pivot) 
                    pivot);
 }
 
+int size(cnf_table::clause_iterator cit) {
+    int d = std::distance(begin(cit), end(cit));
+    ASSERT(d >= 0);
+    return d;
+}
+
 // Relative to an assignment (the interface defined in assignment.h),
 // we can determine if a clause is satisfied, etc...
 
-template <typename ClauseIter, typename Assignment>
-bool is_clause_satisfied(ClauseIter start, ClauseIter finish, const Assignment& a) {
-    // NOTE: std::any_of returns false for empty sequence.
-    // This is consistent with what we want, under self-reduction model of CNF.
-    return std::any_of(start, finish, [&a](literal l) { return a.is_true(l); });
-}
-template <typename C, typename A>
-bool is_clause_satisfied(const C& c, const A& a) {
-    return is_clause_satisfied(begin(c), end(c), a);
-}
-
-template <typename ClauseIter, typename Assignment>
-bool is_clause_unsatisfied(ClauseIter start, ClauseIter finish, const Assignment& a) {
-    // NOTE: all of returns true for empty sequence.
-    // This is USUALLY NOT what we want, under self-reduction model.
-    return std::all_of(start, finish, [&a](literal l) { return a.is_false(l); });
-}
-template <typename C, typename A>
-bool is_clause_unsatisfied(const C& c, const A& a) {
-    return is_clause_unsatisfied(begin(c), end(c), a);
-}
-
-template <typename CNFIter, typename Assignment>
-bool is_cnf_satisfied(CNFIter start, CNFIter finish, const Assignment& a) {
-    return std::all_of(start, finish, [&a](auto cl) {
-        return is_clause_satisfied(begin(cl), end(cl), a);
-    });
-}
-template <typename C, typename A>
-bool is_cnf_satisfied(const C& c, const A& a) {
-    return is_cnf_satisfied(begin(c), end(c), a);
-}
-
-template <typename CNFIter, typename Assignment>
-CNFIter has_conflict(CNFIter start, CNFIter finish, const Assignment& a) {
-    return std::find_if(start, finish, [&a](auto cl) {
-        return is_clause_unsatisfied(begin(cl), end(cl), a);
-    });
-}
-template <typename C, typename A>
-auto has_conflict(const C& c, const A& a) {
-    return has_conflict(begin(c), end(c), a);
-}
-
-// A new way of determining if a clause is unsatisfied, consistent
-// with the notion that an empty clause is unsatisfied.
 template<typename A>
-bool clause_unsatisfied(const small_set<literal>& c, const A& a) {
-    for (literal x : c) {
-        if (!a.is_false(x)) { return false; }
-    }
-    return true;
+bool clause_sat(cnf_table::clause_iterator c, const A& a) {
+    // if range is empty, return false. Consistent with notion of unsat clause.
+    return std::any_of(begin(c), end(c), [&a](literal l) { return a.is_true(l); });
+}
+
+template<typename C, typename A>
+bool clause_unsat(const C& c, const A& a) {
+    // if range is empty, return true. Consistent with notion of unsat clause.
+    return std::all_of(begin(c), end(c), [&a](literal l) {
+        return a.is_false(l);
+    });
+}
+
+template<typename A>
+bool is_cnf_satisfied(const cnf_table& c, const A& a) {
+    return std::all_of(begin(c), end(c), [&a](auto cl) {
+        return clause_sat(&cl, a);
+    });
+}
+
+template<typename A>
+auto has_conflict(const cnf_table& c, const A& a) {
+    return std::find_if(begin(c), end(c), [&a](auto cl) {
+        return clause_unsat(cl, a);
+    });
 }
 
 // Absolutely dead-stupid way of finding unit clauses...
 template <typename C, typename A>
 literal is_unit_clause_implying(const C& c, const A& a) {
-    if (is_clause_satisfied(c, a)) { return 0; }
-    if (is_clause_unsatisfied(c, a)) { return 0; }
+    if (clause_sat(c, a)) { return 0; }
+    if (clause_unsat(c, a)) { return 0; }
 
     auto l_ptr = std::find_if(begin(c), end(c), [&](literal l) {
         return a.is_unassigned(l);
@@ -251,6 +284,9 @@ literal find_unit_in_cnf(const cnf_table& c, const A& a) {
     return 0;
 }
 
+bool clause_contains(cnf_table::clause_iterator cit, literal l) {
+    return std::find(begin(cit), end(cit), l) != end(cit);
+}
 
 // Printing statements, mainly for debugging.
 std::ostream& operator<<(std::ostream& o, const cnf_table::clause& c) {
@@ -265,7 +301,7 @@ std::ostream& operator<<(std::ostream& o, const cnf_table::clause_iterator& c) {
 }
 
 std::ostream& operator<<(std::ostream& o, const cnf_table& cnf) {
-    std::for_each(cnf.clauses.get(), cnf.clauses.get()+cnf.clause_count, [&](const cnf_table::clause& cit) {
+    std::for_each(cnf.clauses.get(), cnf.clauses.get()+cnf.clauses_count, [&](const cnf_table::clause& cit) {
         o << cit << std::endl;
     });
     return o;
