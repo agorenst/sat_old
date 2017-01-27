@@ -171,14 +171,21 @@ bool solve(cnf_table& c) {
             trace("SAT: ", a, "\n");
             return true;
         }
-
         // MAKE A DECISION
-        if (!decision_lit) { // if our unit-prop has'nt made our decision for us.
-            for (cnf_table::clause_iterator cit = begin(c); cit != end(c); ++cit) {
+        else if (!decision_lit) { // if our unit-prop hasn't made our decision for us.
+            // We go backwards thru the CNF to find an unassigned variable.
+            // Backwards seems to be a lot faster than forwards, presumably because
+            // the newly-learned clauses keep things interesting (hackneyed version
+            // of the clause-based heuristic). This sets a fairly low bar, but a bar
+            // for any variable-choosing heuristic actually has to pass.
+            for (cnf_table::clause_iterator cit = end(c) - 1;
+                 cit >= begin(c);
+                 --cit) {
+                if (clause_sat(cit, a)) { continue; };
                 for (auto x : cit) {
                     if (a.is_unassigned(x)) {
                         decision_lit = x;
-                        break;
+                        // We could break, but let's keep control flow simple.
                     }
                 }
                 if (decision_lit) { break; }
