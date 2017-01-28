@@ -1,3 +1,5 @@
+#ifndef DECISION_SEQUENCE
+#define DECISION_SEQUENCE
 // A mapping of decision level to the literals chosen at that level.
 
 #include <memory>
@@ -10,11 +12,29 @@ class decision_sequence {
     void on_resize(cnf_table::clause_iterator old_base,
                      cnf_table::clause_iterator new_base,
                      int new_size) {
-        for (int i = 0; i < level; ++i) {
+        // TODO: < level, or <= level?
+        for (int i = 0; i <= level; ++i) {
             if (Parent[i]) {
                 auto old_index = Parent[i] - old_base;
                 auto new_index = old_index + new_base;
                 Parent[i] = new_index;
+            }
+        }
+    }
+
+    void on_remap(int* m, int n, cnf_table::clause_iterator start) {
+        // TODO: < level, or <= level?
+        for (int i = 0; i <= level; ++i) {
+            if (Parent[i]) {
+                auto old_index = Parent[i] - start;
+                if (m[old_index] == -1) {
+                    Parent[i] = nullptr;
+                    left_right[i] = LRSTATUS::LEFT; // hack...?
+                }
+                else {
+                    Parent[i] = start + m[old_index];
+                    ASSERT(clause_contains(Parent[i], decisions[i]));
+                }
             }
         }
     }
@@ -47,6 +67,7 @@ class decision_sequence {
                            int)> m =
             std::bind(&decision_sequence::on_resize, this, _1, _2, _3);
         c.resizers.push_back(m);
+        c.remappers.push_back(std::bind(&decision_sequence::on_remap, this, _1, _2, _3));
     }
 
     template<typename Assignment>
@@ -55,12 +76,14 @@ class decision_sequence {
            if (left_right[i] == LRSTATUS::RIGHT) {
                if (Parent[i] == nullptr) {
                    trace("Error: right decision=", i, " has no parent!\n");
+                   ASSERT(false);
                    return false;
                }
            }
            else {
                if (Parent[i] != nullptr) {
                    trace("Error: left decision=", i, " has parent=", Parent[i], "\n");
+                   ASSERT(false);
                    return false;
                }
            }
@@ -93,3 +116,5 @@ std::ostream& operator<<(std::ostream& o, const decision_sequence& d) {
     }
     return o;
 }
+
+#endif

@@ -3,6 +3,12 @@
 #include "debug.h"
 #include "clause_map.h"
 
+#include <iostream>
+
+std::ostream& operator<<(std::ostream& o, const std::pair<literal, cnf_table::clause_iterator> p) {
+    return o << "{" << std::get<0>(p) << "|" << std::get<1>(p) << "}";
+}
+
 class watched_literal_db {
     private:
     struct watch_struct {
@@ -11,13 +17,29 @@ class watched_literal_db {
     clause_map<watch_struct> watches_by_clause;
     literal_map<small_set<cnf_table::clause_iterator>> watch_lists;
     small_set<std::pair<literal,cnf_table::clause_iterator>> units;
-    int clause_count;
+    int clause_count = 0;
+
+    void print(std::ostream& o) {
+        for (auto i=watch_lists.first_index(); i != watch_lists.end_index(); ++i) {
+            if (i == 0) continue;
+            o << i << " : ";
+            for (auto cit : watch_lists[i]) { o << "[" << cit << "]"; }
+            o << std::endl;
+        }
+        o << "------------------" << std::endl;
+        for (auto cit = watches_by_clause.first_index();
+                  cit != watches_by_clause.first_index() + clause_count;
+                  ++cit) {
+            o << cit << " : {" << watches_by_clause[cit].w1 << ", " << watches_by_clause[cit].w2 << "}" << std::endl;
+        }
+    }
 
     void on_resize(cnf_table::clause_iterator old_base,
                      cnf_table::clause_iterator new_base,
                      int new_size) {
         // the watches_by_clause is already remapped...
-        trace("Starting to remap watched_literal_db\n");
+        trace("Starting to resize watched_literal_db\n");
+        //print(std::cout);
         for (auto it = watch_lists.first_index();
                   it != watch_lists.end_index();
                   ++it) {
@@ -39,6 +61,38 @@ class watched_literal_db {
             int new_index = old_index;
             *it = {std::get<0>(*it), new_base + new_index};
         }
+
+        trace("Done\n");
+        //print(std::cout);
+        ASSERT(check());
+    }
+
+    void on_remap(int* m, int n, cnf_table::clause_iterator start) {
+        // note that the watches_by_clause has already been remapped.
+        // this fails: ASSERT(check());
+        //print(std::cout);
+
+        for (auto i=watch_lists.first_index(); i != watch_lists.end_index(); ++i) {
+            if (i == 0) { continue; }
+            small_set<cnf_table::clause_iterator> new_watchers;
+            auto old_set = watch_lists[i];
+            for (auto c : old_set) {
+                int old_index = c - start;
+                ASSERT(old_index >= 0);
+                if (m[old_index] == -1) { continue; } // clause removed
+                auto new_clause = start + m[old_index]; // remap...
+                ASSERT(new_clause - start >= 0);
+                new_watchers.insert(new_clause);
+            }
+            watch_lists[i] = new_watchers;
+        }
+
+        // let's just keep things simple for now..
+        clause_count = n;
+        units.clear();
+        //print(std::cout);
+        //printf("Resizing to size: %d\n", n);
+        ASSERT(check());
     }
 
     public:
@@ -47,33 +101,42 @@ class watched_literal_db {
         for (auto it = watches_by_clause.first_index();
                   it != watches_by_clause.first_index() + clause_count;
                   ++it) {
+            trace("WL CHECK: ", it, "\n");
             const auto p = watches_by_clause[it];
             ASSERT(watch_lists[p.w1].contains(it));
-            ASSERT(watch_lists[p.w2].contains(it));
+            if (p.w2) { ASSERT(watch_lists[p.w2].contains(it)); }
+            else { ASSERT(size(it) == 1); }
             ASSERT(p.w1 != p.w2);
         }
         for (auto lit = watch_lists.first_index();
                   lit != watch_lists.end_index();
                   ++lit) {
+            if (lit == 0) { continue; }
+            for (auto cit : watch_lists[lit]) {
+                trace("testing: ", cit, " | ", lit, "\n");
+                ASSERT(clause_contains(cit, lit));
+            }
         }
         return true;
     };
 
     watched_literal_db(cnf_table& cnf):
         watches_by_clause(cnf, cnf.clauses_max, cnf.clauses.get()),
-        watch_lists(cnf.max_literal_count*2)
+        watch_lists(cnf.max_literal_count)
     {
         for (cnf_table::clause_iterator it = cnf.clauses.get();
                 it != cnf.clauses.get() + cnf.clauses_count;
                 ++it) {
             add_clause(it);
         }
+        ASSERT(check());
 
         using namespace std::placeholders;
         // Register ourselves as needing a remap:
         std::function<void(cnf_table::clause_iterator, cnf_table::clause_iterator, int)> m =
             std::bind(&watched_literal_db::on_resize, this, _1, _2, _3);
         cnf.resizers.push_back(m);
+        cnf.remappers.push_back(std::bind(&watched_literal_db::on_remap, this, _1, _2, _3));
     }
 
     //std::pair<literal,cnf_table::clause_iterator> get_unit() {
@@ -96,21 +159,6 @@ class watched_literal_db {
         units.clear();
     }
 
-    // maybe this is faster than just clearing the cache?;
-    template<typename Assignment>
-    void unapply(const Assignment& a, literal l) {
-        for (int i = 0; i < units.size(); ++i) {
-            auto l = std::get<0>(units[i]);
-            auto p = std::get<1>(units[i]);
-
-            if (is_unit_clause_implying(p, a) != l) {
-                trace("WL: unapplication leads to popping ", p, " for ", l, "\n");
-                units.erase(units[i]);
-                --i;
-            }
-        }
-    }
-
     void add_clause(cnf_table::clause_iterator cit) {
         trace("WL: adding clause ", cit, "\n");
         literal w1 = *(cit->start);
@@ -126,6 +174,9 @@ class watched_literal_db {
         watch_lists[w1].insert(cit);
         if (w2) watch_lists[w2].insert(cit);
         clause_count++;
+
+
+        ASSERT(check());
     }
 
     template<typename Assignment>
@@ -180,6 +231,7 @@ class watched_literal_db {
             if (wn != 0) {
                 trace("WL: clause updating watched literal with: ", wn, "\n");
                 watch_lists[-applied].erase(cit);
+                ASSERT(clause_contains(cit, wn));
                 watch_lists[wn].insert(cit);
                 p.w1 = wn;
             }
@@ -194,9 +246,7 @@ class watched_literal_db {
             }
         }
         trace("WL: done applying ", applied, " unit set: ", units, "\n");
+        ASSERT(check());
     }
 };
 
-std::ostream& operator<<(std::ostream& o, const std::pair<literal, cnf_table::clause_iterator> p) {
-    return o << "{" << std::get<0>(p) << "|" << std::get<1>(p) << "}";
-}

@@ -51,6 +51,7 @@ public:
 
     // If a datatype wants to register for when we remap our clause array...
     std::vector<std::function<void(clause_iterator, clause_iterator, int)>> resizers;
+    std::vector<std::function<void(int*, int, clause_iterator)>> remappers;
 
     // Used for initializing the cnf_table.
     template <typename ClauseType>
@@ -153,6 +154,21 @@ public:
         }
         if (raw_data_count * 2 > raw_data_max) {
             resize_raw_data();
+        }
+    }
+
+    void remap_clauses(int* m, int new_clause_count) {
+        for (auto cit = clause_begin(); cit != clause_end(); ++cit) {
+            int old_index = cit - clause_begin();
+            int new_index = m[old_index];
+            if (new_index == -1) { continue; } // this clause is deleted...
+            ASSERT(new_index <= old_index);
+            clauses[new_index] = clauses[old_index];
+        }
+        clauses_count = new_clause_count;
+
+        for (auto r : remappers) {
+            r(m, clauses_count, clause_begin());
         }
     }
 };

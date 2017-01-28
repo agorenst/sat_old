@@ -26,7 +26,9 @@ public:
         else { return -((i + 2) / 2); }
     }
 
-    literal_map(size_t s): data(std::make_unique<T[]>(s)), size(s) {}
+    literal_map(size_t s): data(std::make_unique<T[]>(s)), size(s) {
+        std::fill(data.get(), data.get()+size, T());
+    }
 
     T& operator[](literal i) {
         // TODO: maybe have a different access pattern, or different

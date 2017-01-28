@@ -30,6 +30,20 @@ private:
         std::swap(data, new_data);
     }
 
+    void on_remap(int* m, int n, cnf_table::clause_iterator start) {
+        int checker = 0;
+        // we iterate over SIZE, which is our actual array size
+        for (int i = 0; i < size; ++i) {
+            if (m[i] == -1) { continue; }
+            //printf("%d %d %d %d\n", n, i, checker, m[i]);
+            if (checker != m[i]) { break; }
+            // maker sure we're incrementing things contiguously.
+            ASSERT(checker == m[i]);
+            ++checker;
+            data[m[i]] = data[i];
+        }
+    }
+
 public:
     clause_map(cnf_table& c, const int size, const key_t offset):
         size(size),
@@ -41,6 +55,9 @@ public:
         std::function<void(key_t, key_t, int)> on_resizer =
             std::bind(&clause_map::on_resize, this, _1, _2, _3);
         c.resizers.push_back(on_resizer);
+        c.remappers.push_back(std::bind(&clause_map::on_remap, this, _1, _2, _3));
+
+        std::fill(data.get(), data.get()+size, T());
     }
 
     T& operator[](const key_t k) {
@@ -56,5 +73,10 @@ public:
     T* first_value_iter() { return data.get(); }
     T* last_value_iter() { return data.get()+size; }
 };
+
+template<typename T>
+auto begin(clause_map<T>& m) { return m.first_value_iter(); }
+template<typename T>
+auto end(clause_map<T>& m) { return m.last_value_iter(); }
 
 #endif

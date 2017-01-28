@@ -4,6 +4,7 @@
 #include "decision_sequence.h"
 #include "assignment.h"
 #include "watched_literals.h"
+#include "glue_clauses.h"
 
 #include <algorithm>
 #include <iostream>
@@ -29,11 +30,7 @@ small_set<literal> self_subsuming_resolution(small_set<literal> clause_1,
         std::sort(begin(clause_1), end(clause_1));
         if (std::includes(begin(clause_1), end(clause_1),
                           begin(result), end(result))) {
-            //trace("SSR: ", clause_1, ", ", clause_2, ", ", result, "\n");
-            //std::cout << "SSR: " << std::endl 
-            //          << "\t" << clause_1 << std::endl
-            //          << "\t" << clause_2 << std::endl
-            //          << "\t" << result << std::endl;
+            trace("SSR: ", clause_1, ", ", clause_2, ", ", result, "\n");
             return result;
         }
     }
@@ -75,6 +72,10 @@ bool decision_and_assignment_consistent(const decision_sequence& d,
 };
 
 // This is the main SSS implementation.
+// This function can easily be broken into natural sub-functions,
+// but the presentation goal is to aid students, not development.
+// It's not obvious to me if more subroutines, or more "local code"
+// would help a student study source code.
 bool solve(cnf_table& c) {
     ASSERT(c.sanity_check());
     trace("SSS: start\n");
@@ -87,7 +88,9 @@ bool solve(cnf_table& c) {
     decision_sequence d(c, c.max_literal_count);
     assignment a(c.max_literal_count);
     watched_literal_db wl(c);
+    glue_clauses_db glue(c);
     ASSERT(d.level == 0);
+
 
     // A helper value that will store a small clause.
     small_set<literal> new_parent;
@@ -103,6 +106,17 @@ bool solve(cnf_table& c) {
         ASSERT(d.Parent[d.level] == nullptr);
         ASSERT(d.left_right[d.level] == L);
         ASSERT(d.sanity_check(a));
+
+        // We'll shrink things at the top of the loop? Not obvious when
+        // a good place is...
+        //printf("%d %d\n", glue.current_clause_count, c.clauses_count);
+        if (glue.current_clause_count < c.clauses_count) {
+            //printf("REMAPPING!\n");
+            int n = 0;
+            auto m = glue.generate_mapping(c, n);
+            c.remap_clauses(m.get(), n);
+            glue.current_clause_count *= 2;
+        }
 
         new_parent.clear();
 
@@ -496,9 +510,18 @@ bool solve(cnf_table& c) {
                                 new_parent = self_subsuming_resolution(new_parent, d.Parent[i], d.decisions[i]);
                             }
                         }
+
+                        int glue_value = new_parent.size() > 1
+                                             ? glue.calculate_lbd(d, new_parent)
+                                             : 0;
+
+                        ASSERT(glue_value >= 2 || glue_value == 0);
+
                         auto new_clause_ptr = c.insert_clause(new_parent);
                         trace("CRR: learned ", new_clause_ptr, "\n");
                         wl.add_clause(new_clause_ptr);
+
+                        glue.lbd[new_clause_ptr] = glue_value;
                     }
                     //
                     /////////////////////////////////////////////////
