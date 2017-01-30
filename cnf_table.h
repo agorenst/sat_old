@@ -251,10 +251,16 @@ bool clause_sat(cnf_table::clause_iterator c, const A& a) {
 
 template<typename C, typename A>
 bool clause_unsat(const C& c, const A& a) {
-    // if range is empty, return true. Consistent with notion of unsat clause.
-    return std::all_of(begin(c), end(c), [&a](literal l) {
-        return a.is_false(l);
-    });
+    // This is the fast version.
+    for (auto x : c) {
+        if (!a.is_false(x)) { return false; }
+    }
+    return true;
+    // This is the original version, but it's very slow. In retrospective, the all_of can be negated to be clever.
+    //return std::all_of(begin(c), end(c), [&a](literal l) { return a.is_false(l); });
+    // This is the "negation", but it's still slow! Need to look at codegen... later.
+    //ASSERT(std::all_of(begin(c), end(c), [&a](literal l) { return a.is_false(l); }) == !std::any_of(begin(c), end(c), [&a](literal l) { return !a.is_false(l); }));
+    //return !(std::any_of(begin(c), end(c), [&a](literal l) { return !a.is_false(l); }));
 }
 
 template<typename A>
