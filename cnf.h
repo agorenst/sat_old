@@ -9,51 +9,38 @@
 #include <iostream>
 #include <algorithm>
 
-// A CNF is a sequence of clauses.
-// A clause is a sequence of literals.
-//
-// For efficiency/sanity, its useful to associate each clause with a unique key.
-//
-// In this implementation, we have a flat array of literals, and a sequence of
-// [begin, end) pairs that define the clauses over that flat array.
-//
-// Thus, a clause is simply a pair of pointers, and the clause is uniquely
-// identified by the address of that pair (we define it as a clause_iterator).
-//
-// Under models where we may reallocate memory, the clause iterators may be
-// invalidated -- just be aware.
-
-class cnf_table {
+class cnf {
 public:
-    int clauses_max;
-    int max_literal_count;
-    int raw_data_max;
-    int raw_data_count = 0;
-    int clauses_count = 0;
-
-    std::unique_ptr<literal[]> raw_data;
-
+    // The core types
     typedef literal* raw_iterator;
     struct clause {
         raw_iterator start, finish;
     };
     typedef clause* clause_iterator;
 
+
+    int max_literal_count;
+    int raw_data_max;
+    int raw_data_count = 0;
+    int clauses_max;
+    int clauses_count = 0;
+
+    std::unique_ptr<literal[]> raw_data;
     std::unique_ptr<clause[]> clauses;
-
-    cnf_table(size_t _max_size, size_t _max_clause_count, size_t max_literal_count):
-        raw_data_max(_max_size),
-        clauses_max(_max_clause_count),
-        max_literal_count(max_literal_count),
-        raw_data(std::make_unique<literal[]>(raw_data_max)),
-        clauses(std::make_unique<clause[]>(clauses_max))
-    {}
-
     // If a datatype wants to register for when we remap our clause array...
-    std::vector<std::function<void(clause_iterator, clause_iterator, int)>> resizers;
+    std::vector<std::function<void(clause_iterator,clause_iterator,int)>> resizers;
     std::vector<std::function<void(int*, int, clause_iterator)>> remappers;
 
-    // Used for initializing the cnf_table.
+    cnf(int MaxSize, int ClauseCount, size_t LiteralCount):
+        max_literal_count(LiteralCount),
+        raw_data_max(MaxSize),
+        clauses_max(ClauseCount),
+        raw_data(std::make_unique<literal[]>(MaxSize)),
+        clauses(std::make_unique<clause[]>(ClauseCount))
+    {}
+
+
+    // Used for initializing the cnf.
     template <typename ClauseType>
     clause_iterator insert_clause(const ClauseType& c) {
 
@@ -174,15 +161,81 @@ public:
 };
 
 // Iterating over a CNF means iterating over its clauses.
-cnf_table::clause_iterator end(const cnf_table& c) { return c.clause_end(); }
-cnf_table::clause_iterator begin(const cnf_table& c) { return c.clause_begin(); }
+cnf::clause_iterator end(const cnf& c) { return c.clause_end(); }
+cnf::clause_iterator begin(const cnf& c) { return c.clause_begin(); }
 
 // We want to be able to iterate over clauses, or the clause iterators themselves.
 // Perhaps equating clause iterators and clauses are not ideal, but...
-cnf_table::raw_iterator begin(const cnf_table::clause& c) { return c.start; }
-cnf_table::raw_iterator end(const cnf_table::clause& c) { return c.finish; }
-cnf_table::raw_iterator begin(const cnf_table::clause_iterator& c) { return c->start; }
-cnf_table::raw_iterator end(const cnf_table::clause_iterator& c) { return c->finish; }
+cnf::raw_iterator begin(const cnf::clause& c) { return c.start; }
+cnf::raw_iterator end(const cnf::clause& c) { return c.finish; }
+cnf::raw_iterator begin(const cnf::clause_iterator& c) { return c->start; }
+cnf::raw_iterator end(const cnf::clause_iterator& c) { return c->finish; }
+
+bool clause_contains(cnf::clause_iterator cit, literal l) {
+    return std::find(begin(cit), end(cit), l) != end(cit);
+}
+
+
+// In the backtrack loop, we have a clause against which
+// we resolve many others. So it's useful to have a clause
+// that can grow or shrink as needed. Note that it can't
+// be bigger than #literals.
+class flexsize_clause {
+    public:
+    std::unique_ptr<literal[]> raw_data;
+    cnf::clause my_clause;
+    public:
+    flexsize_clause(const cnf& c):
+        raw_data(std::make_unique<literal[]>(c.max_literal_count)),
+        my_clause{raw_data.get(), raw_data.get()}
+    {}
+    void adopt(cnf::clause_iterator c) {
+        TRACE("Adopting: ", c, "\n");
+        my_clause.finish = std::copy(c->start, c->finish, my_clause.start);
+    }
+    void resolve(cnf::clause_iterator c, literal l) {
+        trace(*this, " ", c, " :  ", l, "\n");
+        ASSERT(contains(l));
+        ASSERT(clause_contains(c, -l));
+        erase(l);
+        std::for_each(begin(c), end(c), [&](literal r) {
+            if (r == -l) { return; }
+            if (contains(r)) { return; }
+            *my_clause.finish = r;
+            my_clause.finish++;
+        });
+    }
+
+    bool contains(literal l) const {
+        return std::find(begin(my_clause), end(my_clause), l) != end(my_clause);
+    }
+    void erase(literal l) {
+        ASSERT(contains(l));
+        auto it = std::find(begin(my_clause), end(my_clause), l);
+        ASSERT(it != end(my_clause));
+        ASSERT(std::find(std::next(it), end(my_clause), l) == end(my_clause));
+        my_clause.finish--;
+        std::swap(*it, *my_clause.finish);
+    }
+    void insert(literal l) {
+        ASSERT(!contains(l));
+        *my_clause.finish = l;
+        my_clause.finish++;
+    }
+    int size() { return my_clause.finish - my_clause.start; }
+    void clear() { my_clause.finish = my_clause.start; }
+};
+
+std::ostream& operator<<(std::ostream& o, const flexsize_clause& c) {
+    std::for_each(begin(c.my_clause), end(c.my_clause), [&](literal l) {
+        o << l << " ";
+    });
+    return o;
+}
+
+
+cnf::raw_iterator begin(const flexsize_clause& c) { return c.my_clause.start; }
+cnf::raw_iterator end(const flexsize_clause& c) { return c.my_clause.finish; }
 
 
 // Helper functions over clauses and CNF tables.
@@ -199,52 +252,15 @@ bool is_trivial_clause(ClauseIter start, ClauseIter finish) {
     });
 }
 
-// The definition of resolving.
-// For now we always return a small_set, but maybe we can do something else.
-template <typename ClauseIterA, typename ClauseIterB>
-small_set<literal> resolve(ClauseIterA start_a,
-                           ClauseIterA finish_a,
-                           ClauseIterB start_b,
-                           ClauseIterB finish_b,
-                           literal pivot) {
-    small_set<literal> resolvent;
-
-    // The pivot must be in a, but not its negation.
-    ASSERT(std::find(start_a, finish_a, pivot) != finish_a);
-    ASSERT(std::find(start_a, finish_a, -pivot) == finish_a);
-
-    // The negation of the pivot must be in b, but not itself.
-    ASSERT(std::find(start_b, finish_b, -pivot) != finish_b);
-    ASSERT(std::find(start_b, finish_b, pivot) == finish_b);
-
-    std::for_each(start_a, finish_a, [&](literal l) {
-        if (l != pivot) resolvent.insert(l);
-    });
-    std::for_each(start_b, finish_b, [&](literal l) {
-        if (l != -pivot) resolvent.insert(l);
-    });
-
-    ASSERT(!is_trivial_clause(std::begin(resolvent), std::end(resolvent)));
-    return resolvent;
-}
-template <typename ClauseA, typename ClauseB>
-small_set<literal> resolve(const ClauseA& ca, const ClauseB& cb, literal pivot) {
-    return resolve(std::begin(ca), std::end(ca),
-                   std::begin(cb), std::end(cb),
-                   pivot);
-}
-
-int size(cnf_table::clause_iterator cit) {
+int size(cnf::clause_iterator cit) {
     int d = std::distance(begin(cit), end(cit));
     ASSERT(d >= 0);
     return d;
 }
 
-// Relative to an assignment (the interface defined in assignment.h),
-// we can determine if a clause is satisfied, etc...
 
-template<typename A>
-bool clause_sat(cnf_table::clause_iterator c, const A& a) {
+template<typename C, typename A>
+bool clause_sat(const C& c, const A& a) {
     // if range is empty, return false. Consistent with notion of unsat clause.
     return std::any_of(begin(c), end(c), [&a](literal l) { return a.is_true(l); });
 }
@@ -256,30 +272,25 @@ bool clause_unsat(const C& c, const A& a) {
         if (!a.is_false(x)) { return false; }
     }
     return true;
-    // This is the original version, but it's very slow. In retrospective, the all_of can be negated to be clever.
-    //return std::all_of(begin(c), end(c), [&a](literal l) { return a.is_false(l); });
-    // This is the "negation", but it's still slow! Need to look at codegen... later.
-    //ASSERT(std::all_of(begin(c), end(c), [&a](literal l) { return a.is_false(l); }) == !std::any_of(begin(c), end(c), [&a](literal l) { return !a.is_false(l); }));
-    //return !(std::any_of(begin(c), end(c), [&a](literal l) { return !a.is_false(l); }));
 }
 
 template<typename A>
-bool is_cnf_satisfied(const cnf_table& c, const A& a) {
+bool is_cnf_sat(const cnf& c, const A& a) {
     return std::all_of(begin(c), end(c), [&a](auto cl) {
         return clause_sat(&cl, a);
     });
 }
 
 template<typename A>
-auto has_conflict(const cnf_table& c, const A& a) {
+auto has_conflict(const cnf& c, const A& a) {
     return std::find_if(begin(c), end(c), [&a](auto cl) {
         return clause_unsat(cl, a);
     });
 }
 
 // Absolutely dead-stupid way of finding unit clauses...
-template <typename C, typename A>
-literal is_unit_clause_implying(const C& c, const A& a) {
+template<typename C, typename A>
+literal clause_implies(const C& c, const A& a) {
     if (clause_sat(c, a)) { return 0; }
     if (clause_unsat(c, a)) { return 0; }
 
@@ -294,36 +305,32 @@ literal is_unit_clause_implying(const C& c, const A& a) {
     return 0;
 }
 
-
-template <typename A>
-literal find_unit_in_cnf(const cnf_table& c, const A& a) {
-    for (auto cit = begin(c);
-         cit != end(c);
-         ++cit) {
-        literal u = is_unit_clause_implying(cit, a);
-        if (u) { return u; }
+template<typename C, typename A>
+std::pair<literal, cnf::clause_iterator> find_unit(const C& c, const A& a) {
+    auto implying_clause = std::find_if(begin(c), end(c), [&](const auto& cl) {
+        return clause_implies(cl, a) != 0;
+    });
+    if (implying_clause != end(c)) {
+        literal implied = clause_implies(implying_clause, a);
+        return std::make_pair(implied, implying_clause);
     }
-    return 0;
-}
-
-bool clause_contains(cnf_table::clause_iterator cit, literal l) {
-    return std::find(begin(cit), end(cit), l) != end(cit);
+    return std::make_pair(0, nullptr);
 }
 
 // Printing statements, mainly for debugging.
-std::ostream& operator<<(std::ostream& o, const cnf_table::clause& c) {
+std::ostream& operator<<(std::ostream& o, const cnf::clause& c) {
     std::for_each(begin(c), end(c), [&](literal l) {
         o << l << " ";
     });
     return o;
 }
 
-std::ostream& operator<<(std::ostream& o, const cnf_table::clause_iterator& c) {
+std::ostream& operator<<(std::ostream& o, const cnf::clause_iterator& c) {
     return (o << *c);
 }
 
-std::ostream& operator<<(std::ostream& o, const cnf_table& cnf) {
-    std::for_each(cnf.clauses.get(), cnf.clauses.get()+cnf.clauses_count, [&](const cnf_table::clause& cit) {
+std::ostream& operator<<(std::ostream& o, const cnf& c) {
+    std::for_each(c.clauses.get(), c.clauses.get()+c.clauses_count, [&](const cnf::clause& cit) {
         o << cit << std::endl;
     });
     return o;

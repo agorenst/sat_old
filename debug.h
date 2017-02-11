@@ -15,18 +15,18 @@
 #include <cstdio>
 #include <iostream>
 template<typename T>
-void trace(const T& value) {
+void TRACE(const T& value) {
     std::clog << value;
 }
 template<typename T, typename... Targs>
-void trace(const T& value, const Targs&... Fargs) {
+void TRACE(const T& value, const Targs&... Fargs) {
     std::clog << value;
-    trace(Fargs...);
+    TRACE(Fargs...);
 }
-#define TRACE(...) printf(__VA_ARGS__)
+#define trace TRACE
 #else
-#define trace(...)
 #define TRACE(...)
+#define trace TRACE
 #endif
 
 

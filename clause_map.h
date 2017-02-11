@@ -2,7 +2,7 @@
 #define CLAUSE_MAP_H
 
 #include "debug.h"
-#include "cnf_table.h"
+#include "cnf.h"
 
 
 // Basically, maps clause_iterator -> T.
@@ -12,12 +12,12 @@ template<typename T>
 class clause_map {
 private:
     int size;
-    typedef cnf_table::clause_iterator key_t;
+    typedef cnf::clause_iterator key_t;
     key_t offset;
     std::unique_ptr<T[]> data;
 
-    void on_resize(cnf_table::clause_iterator old_base,
-                   cnf_table::clause_iterator new_base,
+    void on_resize(cnf::clause_iterator old_base,
+                   cnf::clause_iterator new_base,
                    int new_size) {
         auto new_data = std::make_unique<T[]>(new_size);
 
@@ -30,7 +30,7 @@ private:
         std::swap(data, new_data);
     }
 
-    void on_remap(int* m, int n, cnf_table::clause_iterator start) {
+    void on_remap(int* m, int n, cnf::clause_iterator start) {
         int checker = 0;
         // we iterate over SIZE, which is our actual array size
         for (int i = 0; i < size; ++i) {
@@ -45,7 +45,7 @@ private:
     }
 
 public:
-    clause_map(cnf_table& c, const int size, const key_t offset):
+    clause_map(cnf& c, const int size, const key_t offset):
         size(size),
         offset(offset),
         data(std::make_unique<T[]>(size))

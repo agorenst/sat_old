@@ -1,10 +1,12 @@
 #ifndef GLUE_CLAUSES_H
 #define GLUE_CLAUSES_H
 
-#include "clause_map.h"
-#include "decision_sequence.h"
+#include "debug.h"
 
-class glue_clauses_db {
+#include "clause_map.h"
+#include "assignment.h"
+
+class glue_clauses {
     public:
     clause_map<int> lbd;
 
@@ -21,24 +23,18 @@ class glue_clauses_db {
     int current_clause_count;
 
     // given a clause, calculate how many decisions levels it crosses.
-    int calculate_lbd(const decision_sequence& d,
-                      const small_set<int>& new_parent) {
+    template<typename C>
+    int calculate_lbd(const assignment& a,
+                      const C& cl) {
         present_levels.clear();
-
-        int level_num = 0;
-        for (int i = 0; i <= d.level; ++i) {
-            if (d.left_right[i] == decision_sequence::LRSTATUS::LEFT) { level_num++; }
-            literal_levels[d.decisions[i]] = level_num;
+        for (auto x : cl) {
+            ASSERT(a.is_false(x));
+            present_levels.insert(a.decision_level(-x));
         }
-        for (literal l : new_parent) {
-            //ASSERT(std::find(d.decisions.get(), d.decisions.get()+d.level+1, -l) != (d.decisions.get()+d.level+1));
-            present_levels.insert(literal_levels[-l]);
-        }
-
         return present_levels.size();
     }
 
-    std::pair<int,int> compute_cutoff_values(const cnf_table& c) {
+    std::pair<int,int> compute_cutoff_values(const cnf& c) {
         int current_clauses = c.clauses_count;
         ASSERT(current_clauses > 2);
         int desired_clauses = current_clauses / 2; // integer division is fine.
@@ -79,7 +75,7 @@ class glue_clauses_db {
         return std::make_pair(max_lbd, max_count);
     }
 
-    std::unique_ptr<int[]> generate_mapping(const cnf_table& c, int& new_index) {
+    std::unique_ptr<int[]> generate_mapping(const cnf& c, const assignment& a, int& new_index) {
         int max_lbd, max_count;
         std::tie(max_lbd, max_count) = compute_cutoff_values(c);
         //printf("cutoff: %d %d\n", max_lbd, max_count);
@@ -92,7 +88,8 @@ class glue_clauses_db {
         for (auto cit = c.clause_begin(); cit != c.clause_end(); ++cit) {
             int lbd_score = lbd[cit];
             int old_index = cit - c.clause_begin();
-            if (lbd_score <= max_lbd) {
+            if (lbd_score <= max_lbd
+                || a.is_reason_clause(cit)) {
                 if (lbd_score == max_lbd) { --max_count; }
                 m[old_index] = new_index++;
             }
@@ -105,7 +102,7 @@ class glue_clauses_db {
 
 
 
-    glue_clauses_db(cnf_table& c):
+    glue_clauses(cnf& c):
         lbd(c, c.clauses_max, c.clauses.get()),
         literal_levels(c.max_literal_count),
         lbd_buckets(std::make_unique<int[]>(c.max_literal_count)),
