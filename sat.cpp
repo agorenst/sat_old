@@ -2,7 +2,7 @@
 #include "assignment.h"
 #include "watched_literals.h"
 #include "glue_clauses.h"
-//#include "vsids.h"
+#include "vsids.h"
 
 #include "simple_parser.h"
 
@@ -51,6 +51,7 @@ bool solve(cnf& c) {
     watched_literals   w(c);
     flexsize_clause    p(c);
     glue_clauses       g(c);
+    vsids              v(c);
 
     for (;;) {
         p.clear();
@@ -207,6 +208,7 @@ bool solve(cnf& c) {
             w.add_clause(new_clause_ptr, uip, a);
             ASSERT(uip == clause_implies(new_clause_ptr, a));
             a.push_implicant(uip, new_clause_ptr);
+            v.apply_clause(new_clause_ptr);
             w.apply(a, uip);
 
             continue;
@@ -220,7 +222,7 @@ bool solve(cnf& c) {
                 return !clause_implies(cl, a);
             }));
 
-            literal decision = decide_literal(c, a);
+            literal decision = v.get_literal(a); //decide_literal(c, a);
             if (decision == 0) { return true; }
             TRACE("decision: ", decision, "\n");
 
