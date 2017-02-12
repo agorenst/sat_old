@@ -23,10 +23,8 @@ void TRACE(const T& value, const Targs&... Fargs) {
     std::clog << value;
     TRACE(Fargs...);
 }
-#define trace TRACE
 #else
 #define TRACE(...)
-#define trace TRACE
 #endif
 
 

@@ -61,7 +61,7 @@ private:
                 cnf::clause_iterator new_clause = new_base + index;
                 new_watchers.insert(new_clause);
             }
-            trace("new watch_list for ",  it, ": ", new_watchers, "\n");
+            TRACE("new watch_list for ",  it, ": ", new_watchers, "\n");
             watch_lists[it] = new_watchers;
         }
 
@@ -109,7 +109,7 @@ private:
         for (auto it = watches_by_clause.first_index();
                   it != watches_by_clause.first_index() + clause_count;
                   ++it) {
-            //trace("WL CHECK: ", it, "\n");
+            //TRACE("WL CHECK: ", it, "\n");
             const auto p = watches_by_clause[it];
             ASSERT(watch_lists[p.w1].contains(it));
             if (p.w2) { ASSERT(watch_lists[p.w2].contains(it)); }
@@ -121,7 +121,7 @@ private:
                   ++lit) {
             if (lit == 0) { continue; }
             for (auto cit : watch_lists[lit]) {
-                //trace("testing: ", cit, " | ", lit, "\n");
+                //TRACE("testing: ", cit, " | ", lit, "\n");
                 ASSERT(clause_contains(cit, lit));
             }
         }
@@ -154,7 +154,7 @@ private:
     }
 
     void clear_units() {
-        trace("WL: clearing units\n");
+        TRACE("WL: clearing units\n");
         units.clear();
     }
 
@@ -167,7 +167,7 @@ private:
     }
 
     void add_clause(cnf::clause_iterator cit, literal l, const assignment& a) {
-        trace("WL: adding clause ", cit, "\n");
+        TRACE("WL: adding clause ", cit, "\n");
         ASSERT(cit->start < cit->finish);
         ASSERT(std::find(begin(cit), end(cit), l) != end(cit));
         literal w1 = l;
@@ -188,7 +188,7 @@ private:
         ASSERT(w2 != 0 || size(cit) == 1);
 
         ASSERT(w1 != w2);
-        trace("WL: watched by: ", w1, " ", w2, "\n");
+        TRACE("WL: watched by: ", w1, " ", w2, "\n");
         watches_by_clause[cit] = {w1, w2};
         watch_lists[w1].insert(cit);
         if (w2) watch_lists[w2].insert(cit);
@@ -199,7 +199,7 @@ private:
     }
 
     void add_clause(cnf::clause_iterator cit) {
-        trace("WL: adding clause ", cit, "\n");
+        TRACE("WL: adding clause ", cit, "\n");
         ASSERT(cit->start < cit->finish);
         literal w1 = *(cit->start);
         literal w2;
@@ -209,7 +209,7 @@ private:
         else {
             w2 = *(cit->start+1);
         }
-        trace("WL: watched by: ", w1, " ", w2, "\n");
+        TRACE("WL: watched by: ", w1, " ", w2, "\n");
         ASSERT(w1 != w2);
         watches_by_clause[cit] = {w1, w2};
         watch_lists[w1].insert(cit);
@@ -247,10 +247,10 @@ private:
         ASSERT(a.is_true(applied));
 
         small_set<cnf::clause_iterator> to_visit = watch_lists[-applied];
-        trace("WL: from applied ", applied, " considering clauses:\n");
+        TRACE("WL: from applied ", applied, " considering clauses:\n");
         for (cnf::clause_iterator cit : to_visit) {
             watch_struct& p = watches_by_clause[cit];
-            trace("WL: clause ", cit, " watched by ", p.w1, " ", p.w2, "\n");
+            TRACE("WL: clause ", cit, " watched by ", p.w1, " ", p.w2, "\n");
 
             if (p.w2 == -applied) { std::swap(p.w2, p.w1); }
             ASSERT(p.w1 == -applied);
@@ -295,7 +295,7 @@ private:
                 add_unit(p.w2, cit);
             }
         }
-        trace("WL: done applying ", applied, " unit set: ", units, "\n");
+        TRACE("WL: done applying ", applied, " unit set: ", units, "\n");
         ASSERT(sanity_check());
     }
 };

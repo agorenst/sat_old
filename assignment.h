@@ -89,7 +89,7 @@ class assignment {
     }
 
     void pop_level() {
-        trace("A: pop_level\n");
+        TRACE("A: pop_level\n");
         ASSERT(level > 0);
         ASSERT(assigned_count > 0);
         level--;
@@ -104,7 +104,7 @@ class assignment {
         //return lit_actual;
     }
     void pop_single_lit() {
-        trace("A: pop_single_lit\n");
+        TRACE("A: pop_single_lit\n");
         ASSERT(level > 0);
         ASSERT(assigned_count > 0);
         literal lit_actual = decision_sequence[assigned_count-1];

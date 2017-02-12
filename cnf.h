@@ -70,11 +70,11 @@ public:
         for (auto cit = clause_begin(); cit != clause_end(); ++cit) {
             auto implied = is_unit_clause_implying(cit, a);
             if (implied && implied == l) {
-                trace("found implication reason: ", cit, "\n");
+                TRACE("found implication reason: ", cit, "\n");
                 return true;
             }
             if (implied) {
-                trace("found implied: ", implied, " from clause ", cit, "\n");
+                TRACE("found implied: ", implied, " from clause ", cit, "\n");
             }
         }
         return false;
@@ -86,7 +86,7 @@ public:
             small_set<literal> explicit_set;
             explicit_set.insert(cit->start, cit->finish);
             if (explicit_set.size() != std::distance(cit->start, cit->finish)) {
-                trace("ASSERT: found a bad clause: ", cit, " != ", explicit_set, "\n");
+                TRACE("ASSERT: found a bad clause: ", cit, " != ", explicit_set, "\n");
                 return false;
             }
         }
@@ -194,7 +194,7 @@ class flexsize_clause {
         my_clause.finish = std::copy(c->start, c->finish, my_clause.start);
     }
     void resolve(cnf::clause_iterator c, literal l) {
-        trace(*this, " ", c, " :  ", l, "\n");
+        TRACE(*this, " ", c, " :  ", l, "\n");
         ASSERT(contains(l));
         ASSERT(clause_contains(c, -l));
         erase(l);
