@@ -203,7 +203,7 @@ bool solve(cnf& c) {
                 int n = 0;
                 auto m = g.generate_mapping(c, a, n);
                 c.remap_clauses(m.get(), n);
-                g.current_clause_count *= 2;
+                g.current_clause_count *= 1.3;
             }
 
             auto new_clause_ptr = c.insert_clause(p);
