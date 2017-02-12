@@ -8,14 +8,12 @@
 
 class assignment {
     public:
-// TODO should be enums
     const int R = 0;
     const int L = 1;
     private:
     void on_resize(cnf::clause_iterator old_base,
                      cnf::clause_iterator new_base,
                      int new_size) {
-        // TODO: < assigned_count, or <= assigned_count?
         for (int i = 0; i < assigned_count; ++i) {
             if (Parent[i]) {
                 auto old_index = Parent[i] - old_base;
@@ -26,23 +24,25 @@ class assignment {
     }
 
     void on_remap(int* m, int n, cnf::clause_iterator start) {
-        // TODO: < assigned_count, or <= assigned_count?
         for (int i = 0; i < assigned_count; ++i) {
             if (Parent[i]) {
                 auto old_index = Parent[i] - start;
-                if (m[old_index] == -1) {
-                    ASSERT(0);
-                    Parent[i] = nullptr;
-                    left_right[i] = L; // hack?
-                }
-                else {
-                    Parent[i] = start + m[old_index];
-                    ASSERT(clause_contains(Parent[i], decision_sequence[i]));
-                }
+                ASSERT(m[old_index] != -1);
+                Parent[i] = start + m[old_index];
+                ASSERT(clause_contains(Parent[i], decision_sequence[i]));
             }
         }
     }
     public:
+
+    void restart() {
+        // Note: sometimes we'll have implied literals
+        // that are at level -1. So we'll still have some
+        // literals implied, that's fine.
+        while (level > 0) {
+            pop_level();
+        }
+    }
 
     bool is_true(literal l) const;
     bool is_false(literal l) const;

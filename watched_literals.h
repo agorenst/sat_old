@@ -97,7 +97,7 @@ private:
 
         // let's just keep things simple for now..
         clause_count = n;
-        units.clear();
+        ASSERT(units.size() == 0);
         //print(std::cout);
         //printf("Resizing to size: %d\n", n);
         ASSERT(sanity_check());

@@ -252,7 +252,11 @@ bool is_trivial_clause(ClauseIter start, ClauseIter finish) {
     });
 }
 
-int size(cnf::clause_iterator cit) {
+int size(const cnf::clause& cit) {
+    return end(cit) - begin(cit);
+}
+
+int size(const cnf::clause_iterator cit) {
     int d = std::distance(begin(cit), end(cit));
     ASSERT(d >= 0);
     return d;

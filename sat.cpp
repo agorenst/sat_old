@@ -53,16 +53,12 @@ bool solve(cnf& c) {
     glue_clauses       g(c);
     vsids              v(c);
 
+    int conflict_counter = 0;
+
     for (;;) {
         p.clear();
         TRACE("main loop start\n");
 
-        if (g.current_clause_count <= c.clauses_count) {
-            int n = 0;
-            auto m = g.generate_mapping(c, a, n);
-            c.remap_clauses(m.get(), n);
-            g.current_clause_count *= 2;
-        }
 
         ASSERT(c.sanity_check());
         ASSERT(a.sanity_check());
@@ -172,7 +168,7 @@ bool solve(cnf& c) {
 
             a.pop_level();
             ASSERT(std::all_of(begin(c), end(c), [&](const auto cl) {
-                return !clause_implies(cl, a);
+                return !clause_implies(cl, a) || size(cl) == 1;
             }));
             // There should be at least 1 unassigned literal in p,
             // and it should not somehow be made sat...
@@ -198,11 +194,18 @@ bool solve(cnf& c) {
             // At this point we've cleared our watch literals, so
             // we better not have any more conflict or unit clauses...
             ASSERT(std::all_of(begin(c), end(c), [&](const auto cl) {
-                return !clause_implies(cl, a);
+                return !clause_implies(cl, a) || size(cl) == 1;
             }));
 
             // We learn and apply.
             c.consider_resizing();
+            if (g.current_clause_count <= c.clauses_count) {
+                int n = 0;
+                auto m = g.generate_mapping(c, a, n);
+                c.remap_clauses(m.get(), n);
+                g.current_clause_count *= 2;
+            }
+
             auto new_clause_ptr = c.insert_clause(p);
             g.lbd[new_clause_ptr] = clause_lbd;
             w.add_clause(new_clause_ptr, uip, a);
@@ -211,18 +214,24 @@ bool solve(cnf& c) {
             v.apply_clause(new_clause_ptr);
             w.apply(a, uip);
 
-            continue;
+            conflict_counter++;
         }
         else {
 
             ASSERT(std::all_of(begin(c), end(c), [&](const auto cl) {
-                if (clause_implies(cl, a)) {
-                    trace("Problem clause: ", cl, "\n");
+                if (clause_implies(cl, a) && size(cl) > 1) {
+                    std::cout << "Problem clause: " << cl << std::endl;
                 }
-                return !clause_implies(cl, a);
+                return !clause_implies(cl, a) || size(cl) == 1;
             }));
 
-            literal decision = v.get_literal(a); //decide_literal(c, a);
+            //if (conflict_counter >= 512) {
+            //    conflict_counter = 0;
+            //    a.restart();
+            //}
+
+            //literal decision = decide_literal(c, a);
+            literal decision = v.get_literal(a);
             if (decision == 0) { return true; }
             TRACE("decision: ", decision, "\n");
 
