@@ -142,8 +142,8 @@ class assignment {
         ASSERT(assigned_count >= level);
         if (assigned_count == 0) { return true; }
         for (int i = 1; i < assigned_count; ++i) {
-            literal curr = decision_sequence[i];
-            literal prev = decision_sequence[i-1];
+            DBGSTMT(literal curr = decision_sequence[i]);
+            DBGSTMT(literal prev = decision_sequence[i-1]);
             ASSERT(lit_dec_level[curr] == lit_dec_level[prev] ||
                    lit_dec_level[curr] - 1 == lit_dec_level[prev]);
         }
@@ -204,6 +204,13 @@ class assignment {
     }
     literal* end() const {
         return decision_sequence.get() + assigned_count;
+    }
+
+    literal* rbegin() const {
+        return (decision_sequence.get() + assigned_count) - 1;
+    }
+    literal* rend() const {
+        return decision_sequence.get() - 1;
     }
     int decision_number(literal l) const {
         auto it = std::find(decision_sequence.get(),

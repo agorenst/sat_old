@@ -6,8 +6,10 @@
 #ifdef ASSERTS_ON
 #include <cassert>
 #define ASSERT(x) assert(x)
+#define DBGSTMT(x) x
 #else
 #define ASSERT(x)
+#define DBGSTMT(x)
 #endif
 
 // Basic logging

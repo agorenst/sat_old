@@ -9,27 +9,6 @@
 #include <iterator>
 #include <vector>
 
-literal decide_literal(cnf& c, assignment& a) {
-    for (auto cl : c) {
-        if (!clause_sat(cl, a)) {
-            for (auto x : cl) {
-                if (a.is_unassigned(x)) { return x; }
-            }
-        }
-    }
-    return 0;
-    for (int i = a.is_assigned_true.first_index();
-             i != a.is_assigned_true.end_index();
-             ++i) {
-        if (i == 0) { continue; }
-        if (a.is_unassigned(i)) { return i; }
-    }
-    //for (int i = 1; i <= c.max_literal_count; ++i) {
-    //    if (a.is_unassigned(i)) { return i; }
-    //}
-    return 0;
-}
-
 literal has_uip(flexsize_clause& p, assignment& a) {
     int hitcount = 0;
     literal r = 0;
@@ -52,9 +31,10 @@ bool solve(cnf& c) {
     // Create all the helper data structures.
     assignment         a(c);
     watched_literals   w(c);
-    flexsize_clause    p(c);
     glue_clauses       g(c);
     vsids              v(c);
+
+    flexsize_clause    p(c);
 
     int conflict_counter = 0;
 
@@ -68,11 +48,7 @@ bool solve(cnf& c) {
         ASSERT(w.sanity_check());
         TRACE(a, "\n", c, "\n");
 
-        auto problem = has_conflict(c, a);
-        if (problem != end(c)) {
-            TRACE("BUG: ", problem, "\n");
-        }
-        ASSERT(problem == end(c));
+        ASSERT(has_conflict(c, a) == end(c));
 
         // We start out with BCP. This covers degenerate inputs,
         // and leads to a cleaner induction loop.
@@ -108,13 +84,13 @@ bool solve(cnf& c) {
             // trace backwards to make p a UIP.
             p.adopt(conflict_clause); // a helper class with easier resolution.
 
-            const int old_level = a.curr_level();
+            DBGSTMT(const int old_level = a.curr_level());
             // backtrack until there's only one literal from our decision
             // level left.
             while (!has_uip(p, a)) {
-                if (!a.curr_lit_is_implied()) {
+                DBGSTMT(if (!a.curr_lit_is_implied()) {
                     std::cout << p << std::endl << a << std::endl;
-                }
+                });
                 ASSERT(a.curr_lit_is_implied());
                 // we have to resolve against our reasons
                 if (p.contains(-a.curr_lit())) {
@@ -209,7 +185,9 @@ bool solve(cnf& c) {
                 g.current_clause_count *= 1.3;
             }
 
+            // Learn the clause!
             auto new_clause_ptr = c.insert_clause(p);
+
             g.lbd[new_clause_ptr] = clause_lbd;
             w.add_clause(new_clause_ptr, uip, a);
             ASSERT(uip == clause_implies(new_clause_ptr, a));

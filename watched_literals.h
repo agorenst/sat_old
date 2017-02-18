@@ -120,10 +120,11 @@ private:
                   lit != watch_lists.end_index();
                   ++lit) {
             if (lit == 0) { continue; }
+            DBGSTMT(
             for (auto cit : watch_lists[lit]) {
                 //TRACE("testing: ", cit, " | ", lit, "\n");
                 ASSERT(clause_contains(cit, lit));
-            }
+            });
         }
         return true;
     };
